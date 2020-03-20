@@ -1,0 +1,569 @@
+%% The following is a directive for TeXShop to indicate the main file
+%%!TEX root = diss.tex
+\section{Ray-Traced Ambient Occlusion Benchmark}
+\label{sec:ao_benchmark_intro_inline}
+
+Ambient Occlusion is omnipresent in rendering engines. Rasterization based engines like Unreal or Unity include multiple ambient occlusion techniques. Unreal Engine provides limited support for ray-traced ambient occlusion with tight integration into Microsoft's real-time DXR API. DXR is closed-source and does not provide the flexibility to be used in academia. Fully-fledged open-source CPU ray-tracers such as PBRT~\cite{Pharr:2010:PBR:1854996} and Mitsuba~\cite{10.1145/3355089.3356498} include built-in support for ray-traced CPU ambient occlusion.
+
+Unfortunately, to the best of our knowledge, no open-source GPU raytracer provides an Ambient Occlusion implementation for academic usage. 
+
+The lack of open source ambient occlusion GPU benchmarks in academia has driven us to implement our benchmark for use in academia. 
+We design a benchmark that allows the user to load any model and to generate the ray-traced ambient occlusion for that model on the GPU using 3 distance GPU raytracers. The user is given the freedom to adjust the most important parameters such as Samples Per Pixel (SPP), ray per triangle count (SPT), maximum ray count and ray extent.
+
+\subsection{Determining Ray-Origin}
+\label{subsec:ray_orig}
+
+The first step in generating ambient occlusion rays for RTAO is to load a model. We adopt a STY model loading routine allowing us to load triangular meshes. Our model loader requires vertex positions, connectivity, and vertex normals in the STY or OBJ file format. 
+
+From the triangular mesh, we first have to generate a shape distribution to reconstruct the model. Although it would be easy to simply use the vertex positions of the mesh as the origins for the AO rays, this would lead to a sub-par ambient occlusion effect as illustrated in~\autoref{fig:teapot_vertices}.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.8\linewidth]{ao_folder/figures/teapot_vertices.png}
+ 
+  \caption{\label{fig:teapot_vertices}Using the vertex positions as the origin of the rays for the Teapot model. The regular pattern provides poor surface coverage resulting in a poor visual ambient occlusion effect. Each red dot represents the origin of one ray.}
+\end{figure}
+
+We achieve better surface coverage by randomly sampling each triangle primitive of the model.
+For each triangle with vertices (A, B, C) we generate two random numbers, $r_{1}$ and $r_{2}$ between 0 and 1 and generate a new point P within the triangle by applying the equation given in~\autoref{eq:p_gen_eq}. For the derivation of ~\autoref{eq:p_gen_eq} we refer to~\cite{10.1145/571647.571648}.
+Similarly, we generate the normal N at point P using the vertex normals ($A_{N}$, $B_{N}$, $C_{N}$) as shown in~\autoref{eq:n_gen_eq}
+
+\begin{equation}
+\label{eq:p_gen_eq}
+  P = (1 - \sqrt{r_{1}})A + \sqrt{r_{1}}(1-r_{2})B + \sqrt{r_{1}}r_{2}C
+\end{equation}
+\begin{equation}
+\label{eq:n_gen_eq}
+  N = (1 - \sqrt{r_{1}})A_{N} + \sqrt{r_{1}}(1-r_{2})B_{N} + \sqrt{r_{1}}r_{2}C_{N}
+\end{equation}
+
+The tightness of the coverage of origin points depends on the samples per triangle (SPT). A higher number of samples results in a tighter surface cover and a larger number of rays. The tradeoff between a higher SPT is shown in figure~\autoref{fig:spt_tradeoff}.
+
+\begin{figure}[htb]
+  \begin{subfigure}{0.32\textwidth}
+  \includegraphics[width=\linewidth]{4_spt.png}
+  \caption{4 SPT}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.32\textwidth}
+  \includegraphics[width=\linewidth]{8_spt.png}
+  \caption{8 SPT}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.32\textwidth}
+  \includegraphics[width=\linewidth]{16_spt.png}
+  \caption{16 SPT}
+  \end{subfigure}
+  \caption{\label{fig:spt_tradeoff}
+           Illustration of samples per triangle (SPT) surface coverage for 4spt, 8spt, and 16spt. Each red dot represents the origin of one ray.
+           }
+\end{figure}
+
+\subsection{Determining Ray-Direction}
+Once the ray-origins have been established~\autoref{subsec:ray_orig} the ray's direction has to be determined.
+
+It is possible to take the normalized surface normal N from~\autoref{eq:n_gen_eq} as the ray direction. This would yield an incomplete coverage of the hemisphere originating at P as illustrated in~\autoref{fig:normal_pos_trivial}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.8\linewidth]{normal_pos}
+ 
+  \caption{\label{fig:normal_pos_trivial}Using the vertex normal as ray-direction yields poor sampling of the hemisphere originating at P. Each green dot represents the destination of the ray direction of one ray.}
+\end{figure}
+
+To compute ray-direction accurately we stochastically sample the hemisphere by using a cosine-weighted distribution function~\cite{10.5555/1196364}.
+We first generate an orthonormal basis to the normal N~\cite{Duff2017BuildingAO}. We then stochastically generate a tangent vector using the cosine weighted hemisphere distribution. Finally, we translate the tangent vector into the normal space using the orthonormal basis. 
+
+True ambient occlusion requires multiple independent stochastical samples from the same origin. From one origin point on the surface model, multiple rays should be shot into distinct directions according to the cosine weighted hemisphere distribution. The number of rays is given by the samples per pixel (SPP).
+
+The pseudo-code in~\autoref{lst:ray_dir} illustrates the algorithm.
+On line 1, we iterate over each ray with normal $N$. On line 5 we generate the tangent basis to $N$. A tangent basis is formed of 3 normalized orthogonal vectors $N$, $b1$ and $b2$. We then iterate over each sample in line 7, generating a stochasitically generated sample on line 10 and transforming it into the normal space using the orthonormal basis on line 14.
+
+\begin{lstlisting}[caption={Generation of the ray direction based on ray normal N},label={lst:ray_dir}, language=C++]
+for ray with normal N
+
+  // get orthonormal basis of the normal
+  float3 b1, b2
+  GetTangentBasis(N, b1, b2);
+  
+  for i in range(0, SPP) 
+  {
+    // sample the hemisphere, get a tangent
+    float3 tangent = CosineSampleHemisphere();
+
+    // translate tangent into world_normal space
+    // tangent * float3x3(row0 = b1, row1 = b2, row2 = n)
+    float4 ray_direction = tangent * to_matrix(b1, b2, n);
+  }
+}
+\end{lstlisting}
+
+~\autoref{fig:spp_tradeoff}(a) illustrates the effect of using stochastically distributed ray-directions. The space surrounding the teapot is densely covered. ~\autoref{fig:spp_tradeoff}(b) illustrates the effect of doubling SPP to 2, this configuration provides sufficient ray-distribution for high-quality AO.
+
+\begin{figure}[htb]
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{1_spp.png}
+  \caption{1 SPP}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{2_spp.png}
+  \caption{2 SPP}
+  \end{subfigure}
+  \caption{\label{fig:spp_tradeoff}
+           Illustration of samples per pixel (SPP) using the stochastic hemisphere sampling approach from~\autoref{lst:ray_dir}. Each green dot represents the destination of the ray direction of one ray.
+           }
+\end{figure}
+
+\subsection{Tracing Rays}
+
+Once all the rays have been generated with origin and directions, they are ready to be traced using existing raytracers. 
+
+We generate the BVH acceleration structure using Intel Embree~\cite{Wald:2014:EKF:2601097.2601199}. We then port this acceleration structure to the GPU by flattening it into an array. 
+We use 3 existing intersections and trace algorithms.
+
+Aila et al.~\cite{Aila:2009:UER:1572769.1572792} published a raytracing GPU benchmark in 2010. The benchmark uses a binary BVH acceleration structure.
+The kernel is implemented as a persistent thread kernel, work is fetched on completion of previous rays. Because this benchmark is a one-ray-per-thread benchmark, a traversal stack is maintained. 
+We implement the Aila benchmark in CUDA as a compute kernel, we use CUDA-10 as shown in~\autoref{lst:aila_while_while}. This benchmark uses two while loops to cmplete the raytracing work. 
+The preliminary while loop on line 1 in~\autoref{lst:aila_while_while} determines the termination of a ray. This while loop only terminates if a ray does not intersect with any more nodes, i.e. the traversal stack is empty. 
+The two supsequent while loops on line 2 and line 6 do intersections of interior nodes and leaf nodes respectively. This ordering assures that all interior nodes have been intersected before intersecting any leafs. Performance number from ~\cite{Aila:2009:UER:1572769.1572792} show that this separation between leaf and interior nodes utilizes the GPU cache hierarchy in the most efficient manner and therefore provides the best performance. 
+
+\begin{lstlisting}[caption={While-While loop for Aila et al.~\cite{Aila:2009:UER:1572769.1572792} raytracing benchmark},label={lst:aila_while_while}, language=C++]
+while (ray not terminated)
+  while (interior nodes to be intersected)
+    intersect interior nodes
+    maintain traversal stack
+
+  while (leaf nodes to be intersected)
+    intersect primitives
+\end{lstlisting}
+
+
+Ylitie et al.~\cite{Aila:2009:UER:1572769.1572792} published an improvement on the Aila benchmark in 2017.
+The improved benchmark uses an 8-wide BVH acceleration structure. Using a wide acceleration structure has the advantage that it shortens the number of interior nodes each ray has to intersect before reaching a leaf. Ylitie et al. further compress the interior and the leaf nodes, reducing the memory overhead of each traversal. The traversal order for leafs is not fixed, leafs are traversed from front to back according to ray-octant.
+
+We implement the Ylitie benchmark in CUDA as a compute kernel, we use CUDA-10 as shown in~\autoref{lst:ylitie_becnhmark}.
+The stack is again managed manually, the traversal stack $S$ on line 1 is accompanied by 2 additional stacks, $G$ and $G_t$ which indicate the current leaf or interior nodes to operate on. Line 5 shows that again, the kernel is implemented as an infinite while loop that does not terminate until the exit condition on line 27 is met. 
+The kernel is implemented as a variation of Aila's while-while implementation. First all interior nodes are traversed, line 7, then all leaf nodes are traversed, line 18. Finally either a new node is popped from the stack or the ray terminates, line 25.
+
+\begin{lstlisting}[mathescape=true, caption={Ylitie et al.~\cite{Aila:2009:UER:1572769.1572792} GPU BVH traversal benchmark},label={lst:ylitie_becnhmark}, language=C++]
+r = get_ray() // get ray from ray pool
+$S$ = {} // traversal stack
+$G$ = {root} // current node to operate on
+$G_t$ = {} // current leaf node
+while(1)
+  /*interior node loop*/
+  if $G$ is interior node
+    n = get_closest_node(G, r)
+    $G$ = $G$ - {n}
+    if $G$ is not empty
+      S.push(G)
+      G = intersect_children(n, r)
+  else // G is leaf node
+    $G_t$ = $G$    
+    $G$ = {}
+
+  /*leaf node loop*/
+  while $G_t$ is not empty
+    t = get_next_triangle($G_t$)
+    $G_t$ = $G_t$ - {t}
+    intersect_triangle(t, r)
+
+  /*terminal condition*/
+  if G is empty and S is not empty
+    G = pop_stack(S)
+  else
+    return // done!
+\end{lstlisting}
+
+Finally, we use NVIDIA's optiX API~\cite{Parker:2010:OGP:1778765.1778803} as a reference. OptiX is the state-of-the art GPU raytracing API. OptiX manages it's own acceleration structure and traversal and intersection operation. The closed source nature of OptiX is therefore not suited for academic research. we nonetheless compare our benchmarks for both performance and correctness against OptiX. 
+
+Using the OptiX API for our RTAO query requires a few distinct steps as shown in~\autoref{lst:optix_becnhmark}. Lines 1-5 setup the model. We feed both the vertex buffer and the index buffer of the model to the OptiX API. Lines 7-9 setup the rays. We feed the ray data to OptiX and setup a structure for the result data. 
+Finally, on line 11 we execute the query which translates to tracing the rays. OptiX abstracts all tracing logic away from the programmer, we do not know what the execute() function does under the hood. 
+
+\begin{lstlisting}[mathescape=true, caption={OptiX Prime~\cite{Parker:2010:OGP:1778765.1778803} query implementation},label={lst:optix_becnhmark}, language=C++]
+  optix::prime::Context OptiXContext = optix::prime::Context::create(RTP_CONTEXT_TYPE_CUDA);
+  optix::prime::Model SceneModel = OptiXContext->createModel();
+  SceneModel->setTriangles(rg.IndexBuffer.size(), RTP_BUFFER_TYPE_HOST, rg.IndexBuffer.data(), rg.VertexBuffer.size(), RTP_BUFFER_TYPE_HOST, rg.VertexBuffer.data());
+  SceneModel->update(RTP_MODEL_HINT_NONE);
+  SceneModel->finish();
+
+  optix::prime::Query query = SceneModel->createQuery(RTP_QUERY_TYPE_CLOSEST);
+  query->setRays(numRays, RTP_BUFFER_FORMAT_RAY_ORIGIN_TMIN_DIRECTION_TMAX, RTP_BUFFER_TYPE_CUDA_LINEAR, rg.cudaRays);
+  query->setHits(numRays, RTP_BUFFER_FORMAT_HIT_T_TRIID_U_V, RTP_BUFFER_TYPE_CUDA_LINEAR, cudaHits);
+
+  query->execute();
+\end{lstlisting}
+
+\section{Visual Ambient Occlusion Output}  
+\label{sec:visual_ao}
+
+We visualize the ambient occlusion output using the GPU raytraced benchmarks with Blender~\cite{blender_citation}, an open-source 3D modeling tool.
+The raytracer outputs a buffer with an entry for each ray, the entry is either 0, indicating that the ray missed all geometry, or the entry is a floating point value between $t_{min}$ and $t_{max}$ indicating that the ray hit geometry within it's extent.
+
+The output of our ambient occlusion benchmark is a .STY file. Each entry in the file corresponds to one 3D point $P$ on the surface of the model. The number of points in file is calculated as:
+
+\begin{equation}
+\label{eq:trivial_num_samples}
+  NumberOfSamples = NumberOfTriangles * SPT
+\end{equation}
+
+Each entry consists furthermore of a gray-scale color. The color is representative of the ambient occlusion value. The darker the color the less ambient occlusion is applied. This is counter-intuitive to the natural phenomenon of ambient occlusion: the more a point is occluded, the darker it should be represented. Our benchmark, however, aims to visualize ambient occlusion independently of all other visual effects. We find that debuggagbility and visual clarity is increased by inverting the gray-scale such that a white point represents a perfectly occluded point and a black point represents a little occluded point.
+If a point is perfectly unoccluded it is omitted from our visual representation. 
+
+\begin{minipage}{\linewidth}
+\begin{lstlisting}[mathescape=true, caption={Assigning color to each sample point}, label={lst:color_assignment}, language=C++]
+  for each sample point $P$
+    sum = 0
+    for each sample in SPP 
+      if intersection_distance > t_{min}
+        sum++
+
+    grayscale_color = sum / SPP
+
+    if (sum > 0) 
+      write $P$ to file
+      $P$_{color} = grayscale_color
+\end{lstlisting}
+\end{minipage}
+
+The color of each sample point is determined by averaging the amount of rays that hit an object as shown in~\autoref{lst:color_assignment}. If a sample is perfectly occluded, $sum = SPP$ on line 7. Therefore the corresponding pixel will have a color of 1, which equals black. If a sample is perfectly unoccluded, $sum = 0$ on line 7; in this case the check on line 9 fails and the sample is omitted from the visual representation. This way we make sure not to cluster our representation while still showing all relevant information. 
+
+
+
+In~\autoref{fig:ao_bechmark_complex_scenes} we show the visual output from our raytraced ambient occlusion benchmark on scenes of various complexities and triangles counts. All benchmarks are taken from~\cite{McGuire2017Data}. The summary of the benchmarks is shown in~\autoref{tab:benchmark_description}.
+
+\begin{table}
+\begin{tabular}{ |p{3cm}||p{3cm}|p{3cm}|p{3cm}|  }
+ \hline
+ Scene Name & Number of triangles & BVH Node Memory (MB) & Triangle Node Memory (MB) \\
+ \hline
+ Teapot     & 15k     & 0.09  & 0.41 \\
+ Dragon     & 300k    & 1.6   & 5.7 \\
+ Sponza     & 262k    & 4.6   & 17.77 \\
+ Buddha     & 1 mio   & ~\note{}  & ~\note{} \\
+ Hairball   & 2.8 mio & ~\note{}  & ~\note{} \\
+ San Miguel & 7.8 mio & 176   & 574.5 \\
+ \hline
+\end{tabular}
+\caption{\label{tab:benchmark_description}Sample scenes used for performance evaluation of our RTAO benchmark}
+\end{table}
+
+Teapot is a tiny example scene, it is not to be used as a benchmark but rather as a tool for quick visualization and conceptual debugging. Both hairball and San Miguel are large scenes of high geometrical complexity, they are not meant for real-time rendering as they are too complex. They are included nonetheless as a benchmark for future oriented hardware and as a tough workload illustrating that our benchmark can handle complex scenes. 
+
+\afterpage{
+\begin{figure}[htb]
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{teapot_32_32.png}
+  \caption{Utah Teapot}
+  \label{subfig:teapot_ao}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[height=6cm, width=\linewidth]{dragon_32_32.png}
+  \caption{Dragon}
+  \label{subfig:dragon_ao}
+  \end{subfigure}
+  \qquad
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[height=6cm, width=\linewidth]{sponza_16_16.png}
+  \caption{Sponza}
+  \label{subfig:sponza_ao}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+   \begin{subfigure}{0.49\textwidth}
+  \includegraphics[height=6cm, width=\linewidth]{buddha.png}
+  \caption{Buddha}
+  \label{subfig:buddha_ao}
+  \end{subfigure}
+  \qquad
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[height=6cm, width=\linewidth]{hairball.png}
+  \caption{Hairball}
+  \label{subfig:hairball_ao}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[height=6cm, width=\linewidth]{san_miguel.png}
+  \caption{San Miguel}
+  \label{subfig:san_mig_ao}
+  \end{subfigure}
+  
+  
+  \caption{\label{fig:ao_bechmark_complex_scenes}
+           Our Ray-Traced Ambient Occlusion output visualized on 8 scenes. We used 32 SPP and 32 SPT for (a) and (b) and 4 SPP and 4 SPT for (c) through (f).
+           }
+\end{figure}
+\clearpage
+}
+
+The biggest impact on quality of the AO effect are the values of Samples per Pixel (SPP) and Samples per Triangle (SPT). The user can chose the appropriate value, the higher the values chosen the higher the quality of the ambient occlusion effect but the more rays are being traced and the longer the runtime. 
+
+As mentioned in~\autoref{ch:Introduction}, there is an inherent tradeoff in Computer Graphics: quality vs speed. While the highest visual output is achieved with high SPPs and SPTs. Performance scales linearly with both SPT and SPP as discussed in~\autoref{sec:mem_behavior_performance}, therefore it is crucial to not waste resources.
+
+~\autoref{fig:spp_tradeoff_AO} illustrates the tradeoff of the SPP valus on the teapot scene, SPT is held constant at a high value of 32. 1 sample per pixel yields in poor ambient occlusion output. With 1 SPP the color algorithm described in~\autoref{lst:color_assignment} outputs a binary value: there either is occlusion or there is none. 32 SPPs on the other end of the spectrum provide a value in the range from 0-32, this value indicates the amount of ambient occlusion and allows for a much more accurate viusal effect. 
+
+~\autoref{fig:spt_tradeoff_AO} illustrates the tradeoff in choosing the SPT value on the dragon scene while keeping the SPP value constant at a high 32.
+SPT roughly translates to the coverage of the surface area of the model. A small SPT number provides sufficient coverage if the model is composed of many small triangles. A small SPT values provides bad coverage for models with large flat triangles.
+We suggest keeping the SPT value low. Areas with a high density of small triangles in a  model suggest sharp angles and complex geometry. These are the areas where the AO effect is most pronounced. Large flat surfaces generally do not have any significant visual AO effect. 
+
+\section{Performance and Memory behaviour of GPU Ray-Traced Ambient Occlusion} 
+\label{sec:mem_behavior_performance} 
+
+We have explained the setup of our RTAO benchmark in~\autoref{sec:ao_benchmark_intro_inline}, we then measured the performance of the CUDA kernels using nvprof and described the outcome in. In this section we measure the performance of the RTAO benchmark on a high level by timing the CUDA kernels and on a low level using the GPGPU-Sim simulator~\cite{4919648}. 
+
+\subsection{Performance evaluation}
+\label{sec:perf_eval}
+
+~\autoref{tab:ao_to_completion} shows the time it takes to render the complete AO effect for our benchmark scenes. The test configuration is set to 8 SPP and 1 SPT. The results produced are a high quality AO effect. 
+Naturally, it takes longer to trace large scenes. Larger scenes have more triangles and therefore more rays are traced.
+
+Across benchmarks, a trend can be observed. The Aila et al. benchmark using a binary BVH generally performs slower than Ylitie et al. and OptiX Prime. OptiX performs best of all our benchmarks. We suspect OptiX uses highly optimized CUDA kernels and pre-processes the rays to increase ray-coherence and ray locality. The closed-source nature of OptiX prevents us from confirming our speculations.
+
+\begin{table}
+\begin{tabular}{ |p{3cm}||p{3cm}|p{3cm}|p{3cm}|  }
+ \hline
+ Scene Name & Aila et al.~\cite{Aila:2009:UER:1572769.1572792} & Ylitie et al.~\cite{Ylitie:2017:EIR:3105762.3105773} & NVIDIA OptiX prime~\cite{Parker:2010:OGP:1778765.1778803} \\
+ \hline
+ Teapot     & 0.223   & 0.144  & 0.199 \\
+ Dragon     & 3.28    & 1.819   & 1.99 \\
+ Sponza     & 3.488    & 4.043   & 3.19 \\ 
+ San Miguel & 872.3 & 392.6  & 363.57 \\
+ Buddha     & 1141.019   & 395.724  & 966.537 \\
+ Hairball   & 20.283 & 10.778  & 8.99 \\
+ \hline
+\end{tabular}
+\caption{\label{tab:ao_to_completion}The time (in mS) rendering the complete AO effect at 8 SPP and 1 SPT per scene for the 3 GPU raytracers}
+\end{table}
+
+\subsubsection{Effect of scene size on performance}
+\label{subsec:scene_size_perf_res}
+
+\begin{figure}[htb]
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{performance_scene_vs_triangles.png}
+  \caption{\label{fig:kernel_perf_a}Kernel timing vs \# triangles in scene}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{60_fps_line.png}
+  \caption{\label{fig:kernel_perf_b}Kernel timing, 60 fps. Right most bars are cut-off.}
+  \end{subfigure}
+
+  \caption{\label{fig:kernel_perf}
+           Kernel timing for Aila, Ylitie and OptiX benchmarks for all 6 benchmark scenes. 8 SPP, 1 SPP.~\autoref{fig:kernel_perf_a} shows the number of trianges per scene, ~\autoref{fig:kernel_perf_b} shows 60 fps.
+           }
+\end{figure}
+
+~\autoref{fig:kernel_perf} shows the performance of each of the 3 GPU raytracing benchmarks on each of the 6 sample scenes. These performance numbers were measured by running the RTAO benchmark on real hardware. The GPU used for all measurements was an NVIDIA 2080, Turing architecture from 2019. This GPU is a commercially available, high end desktop GPU found in up-to-date gaming PCs. The numbers therefore represent the upper end of the desktop performance scale. We times the kernels using the CUDA timing tools and profiling tools such as NVProf~\cite{NVIDIA-Turing}.
+
+~\autoref{fig:kernel_perf_a} shows the performance results with respect to the number of triangles of the benchmark scenes. We can observe a trend: the number of triangles grows exponentially while the runtime grows linearly. This is inline with the runtime of the BVH acceleration structure which is $O(log(n))$, where $n$ is the number of primitives in the scene.
+Comparing all 3 benchamrks, it can be observed that Ylitie et al. and OptiX prime far outperform the Aila et al. benchmark.
+Interestingly, Ylitie et al. outperforms OptiX prime on the large and complex Hariball scene due to the optimization for highly diverged workloads. Ylitie et al. trade performance on coherent rays for better performance on incoherent rays.
+
+~\autoref{fig:kernel_perf_b} shows the timing of the kernel with respect to the 60fps cutoff enforced in video games. On a high-end GPU, tracing complete AO remains well beyond the small scenes of Dragon, Sponza and Buddha. Complex scenes like San Miguel and Hariball exceed the cutoff by over 10X. These complex scenes remain far beyond the reach of current GPU architectures.  
+
+\subsubsection{Effect of SPP on performance}
+
+\begin{figure}[htb]
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{spp_perf_mS.png}
+  \caption{\label{fig:kernel_perf_a}Kernel timing vs SPP (mS), 60 fps for reference}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{spp_perf_mrayss.png}
+  \caption{\label{fig:kernel_perf_b}Kernel timing vs SPP in million rays per second MRays/s}
+  \end{subfigure}
+
+  \caption{\label{fig:kernel_perf}
+           Kernel timing for Aila, Ylitie and OptiX benchmarks for the Buddha scene for different values of SPP. The kernel performance scales linearly with SPP. 
+           }
+\end{figure}
+
+~\autoref{fig:kernel_perf} shows the runtime of the RTAO benchmark for the Buddha scene with various numbers of SPP. SPP is the biggest knob for visual output quality in ray tracing (~\autoref{sec:ao_intro}, ~\autoref{sec:rt_intro}). Visual output increases with a higher number of SPP. ~\autoref{fig:kernel_perf_a} shows that performance scales linearly with SPP count. 
+~\autoref{fig:kernel_perf_a} shows the real-time line of 60fps for the Buddha scene. It is possible to trace at most 8 SPP while maintaining 60fps if we were to use the entire compute capabilities of a high-end GPU. AO is a post-processing effect and only a small addition to the overall rendering pipeline. It is, therefore, not feasible to utilize the entire GPU. ~\autoref{fig:kernel_perf_a} shows that adding AO effect to rasterization engines as a post-processing effect has to be reduced to low SPP numbers in the range of 1 to 4.
+
+~\autoref{fig:kernel_perf_b} shows another popular performance metric in raytracing: million rays per second (MRays/s). This metric has the advantage of abstracing away the number of rays traced from performance. While ~\autoref{fig:kernel_perf_b} shows the same data as ~\autoref{fig:kernel_perf_a}, a different trend becomes visible: the higher the number of SPP, the higher the rays/s. This is due to ray coherence. Large SPP generates multiple rays with similar origins and similar directions. Especially the OptiX benchmark capitalizes on this, 32 SPP is almost 30\% faster than 16 SPP. 
+
+% \subsubsection{Feasibility on mobile devices}
+% maybe add this section?
+
+\subsection{Memory evaluation}
+
+We use GPGPU-Sim~\cite{4919648} to analyze the detailed behaviour of out GPU AO benchmark on modern GPU architectures. 
+GPGPU-Sim is a cycle-level simulator that simulates the CUDA compute kernels and provides detailed statistics.
+
+As a case study, we evaluate the Ylitie et al.~\cite{Ylitie:2017:EIR:3105762.3105773} benchmark for the dragon and Sponza scenes. We chose the Ylitie et al. benchmark over the Aila et al. benchmark because it performs better. The Ylitie et al. benchmark is the fastest open-source GPU raytracer to date.
+
+In this section, we evaluate the dragon and the Sponza scenes because they are mid-range scenes. Both scenes are representative of moderate mobile workloads, i.e. we would expect to be able to run scenes of this complexity on today's phones and tablets at 60 fps. 
+Evaluating too small a scene results in incorrect results because raytracing applications are memory bound. Raytracing small scenes, however, is compute bound~\cite{Aila:2010:ACT:1921479.1921497}. The reason for this discrepancy is that for small scenes the entire acceleration structure and the leaf nodes fit in the L2 cache. This is not a realistic workload, today's video game scenes and movie scenes are much larger than any L2 cache. Both the Sponza and the Dragon scene exceed the L2 cache of conventional GPUs and are therefore appropriate scenes for a memory study.
+We refrain from evaluating large scenes because the trends observed for memory bound scenes hod true for even larger scenes.
+
+\subsubsection{Memory access classification}
+\label{subsec:mem_classification}
+
+All memory accesses are generated at one of the many GPU cores.
+We log these memory accesses hen running the AO benchmark using CUDA compute kernels before they enter the Load-Store queue (LDST). When memory accesses are generated, they are not yet dependent on the cache hierarchy. 
+Memory accesses are classified by buffer: a memory access can be assigned to one of 5 buffers:
+
+\begin{enumerate}
+   \item BVH interior node buffer - a flattened buffer representing the interior nodes of the BVH tree. Each node stores its AABB values, the child node pointers and additional information such as depth and leaf node information.
+   \item leaf node buffer - a flattened buffer representing the triangle information of the scene. Each node stores triangle information for all triangles contained in the leaf node. 
+   \item ray buffer - each entry represents a ray. A ray is represented by 8 floating point values, 3 values for the ray origin $O$, 3 values for the ray direction $d$ and 2 values for the ray extent $t_{min}, t_{max}$. 
+   \item ray-result buffer - each entry is the result of the corresponding ray from the ray buffer. The ray result is composed of a single floating point value and the triangle id of the hit. 
+   \item traversal stack - the traversal stack is maintained for acceleration structure traversal. The traversal stack is kept in shared memory but can occasionally spill to DRAM.
+\end{enumerate}
+
+~\autoref{fig:LDST_distrib} shows the distribution of the memory accesses generated at the LDST for each of the 6 buffers.
+From ~\autoref{fig:LDST_distrib} it is evident that the largest chunk of memory accesses are accessing the interior nodes of the acceleration structure, followed by memory accesses for the triangles of the scene. 
+This shows that most memory accesses are generated when traversing the tree, which is a result of the pointer chasing nature of traversing a tree structure. The second largest cause for memory accesses is the triangle geometry, followed by the ray buffer and the ray result buffer. 
+It is to be noted that the traversal stack causes negligible amounts memory traffic. This is because Ylitie et al.~\cite{Ylitie:2017:EIR:3105762.3105773} have significantly compressed the stack traffic. 
+
+\begin{figure}[htb]
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{dragon_LDST_mem_distrib.png}
+  \caption{Dragon}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{sponza_LDST_mem_distrib.png}
+  \caption{Sponza}
+  \end{subfigure}
+
+  \caption{\label{fig:LDST_distrib}
+           Distribution of memory accesses generated at the GPU compute cores. 100k rays, 8 SPP, 8SPT.
+           }
+\end{figure}
+
+\subsubsection{Cache performance}
+
+We study the cache performance of GPU architectures.
+GPGPU-Sim emulates the cache hierarchy of NVIDIA GPU's. Each compute core has a 128kB sized data cache that is independent of all other L1 caches. 
+Furthermore there are different caches, such as the instruction cache used for instructions, the constant cache and the texture cache. 
+In the Ylitie et al.~\cite{Ylitie:2017:EIR:3105762.3105773} benchmark that we use for our cache evaluation, the texture cache is unused. The constant cache is used for the stack traffic. 
+The L2 cache is unified on NVIDIA GPUs. The L2 cache size used for simulation is 4MB.
+
+~\autoref{tab:cache_miss_rates} shows the miss rates of the caches as measured by GPGPU-Sim. The configuration for the GPU simulator can be found in the Appendix. 
+The highly optimized benchmark minimizes the miss rates on the caches. The L1 data cache that funnels BVH interior nodes and scene geometry as well as ray data to the cores has miss rate of 75\%, which is quite acceptable for a small, close-to-the-core, cache.
+The L2 cache miss rate ranges from 32\% for the smaller dragon scene to 48\% for the larger Sponza scene. The increase of the L2 miss rate is directly proportional with the scene size. The larger the scene, the larger the BVH tree, the more pressure is put on the L2. This finding is in line with our observations from~\autoref{subsec:scene_size_perf_res} where we found that kernel performance scales linearly with scene size. From~\autoref{tab:cache_miss_rates} we can conclude that this correlation is due to a higher number of DRAM accesses for larger scenes. 
+
+\begin{table}[t]
+\centering
+\begin{tabular}{ |c||c|c|c|  }
+ \hline
+ Cache & Miss Rate Dragon & Miss Rate Sponza & Comments \\
+ \hline
+ L1D     & 0.76   & 0.7515  & TODO \\
+ L1C     & 0.29    & 0.29   & Traversal stack only \\
+ L1I     & 0.008    & 0.008   & Instructions only \\ 
+ \hline
+ L2 & 0.32 & 0.48  & TODO \\
+ \hline
+\end{tabular}
+\caption{\label{tab:cache_miss_rates}Cache miss rates for various GPU caches for the Dragon and Sponza scene}
+\end{table}
+
+~\autoref{fig:cache_miss_bar} shows the miss rates of the caches per buffer.
+We plot the L1 data cache miss rates for both the Dragon in~\autoref{sub_plot:cache_miss_a} and the Sponza scene in~\autoref{sub_plot:cache_miss_b}. From the bars we can see that the L1 data cache is high on misses. All accesses to the ray input and the ray result data result in 100\% misses (blue and red bars). This is expected because these are cold cache misses. The ray input and result data are only accesses a single time for the trace operation and see no reuse. The BVH data (yellow bar) is the only buffer that sees some reuse in the L1 cache. The hit rate for the BVH buffer is around 68\% for both the Dragon and the Sponza scene, therefore scene size does not matter when it comes to L1 hit rates. The triangle buffer (green bar) experiences some result although the miss rate for the L1 hovers around 92\% for both Dragon and Sponza. 
+~\autoref{sub_plot:cache_miss_a} and ~\autoref{sub_plot:cache_miss_b} confirms that the L1 is of little use, except when storing BVH data. 
+
+~\autoref{sub_plot:cache_miss_c} and ~\autoref{sub_plot:cache_miss_d} show the unified L2 cache rates. Similarly to the L1, the L2 cache does not see any hits for the ray input or the ray output. 
+The L2 cache, however, has a significant hit rate for the BVH data (yellow bar), the stack data (orange bar) and the instructions (light blue bar).
+The most important observation is that the BVH miss rate in the L2 cache is under 10\% for the Dragon scene, but only 25\% for the Sponza scene. This discrepancy can be attributed to the model size, the Sponza model is larger than the Dragon model, therefore more data needs to be transferred from DRAM to the L2 cache, evicting data which could have been a hit. The number of conflict misses increases with screen size.
+The increase in conflict misses from Dragon to Sponza is more pronounced in the primitive buffer (green bar). The miss rate for the primitive buffer of the Dragon scene is at 42\% while the miss rate for the larger Sponza scene is at 86\%.
+
+~\autoref{fig:cache_miss_bar} shows that the main reason for performance reduction with increased scene size is the number of conflict misses and the amount of data touched by the compute cores. 
+% this is a weak statement! I don't know how to make this stronger though....
+
+\begin{figure}[htb]
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{dragon_l1_bar.png}
+  \caption{\label{sub_plot:cache_miss_a}Dragon - L1 data cache}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{sponza_l1_bar.png}
+  \caption{\label{sub_plot:cache_miss_b}Sponza - L1 data cache}
+  \end{subfigure}
+  \qquad
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{dragon_l2_bar.png}
+  \caption{\label{sub_plot:cache_miss_c}Dragon - L2}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{sponza_l2_bar.png}
+  \caption{\label{sub_plot:cache_miss_d}Sponza - L2}
+  \end{subfigure}
+  \caption{\label{fig:cache_miss_bar}
+          L1 data and L2 cache miss rates per buffer - Dragon and Sponza Scene.
+           }
+\end{figure}
+
+\subsubsection{Memory reuse}
+
+In this section we present our memory reuse study of the Dragon scene using our RTAO benchmark and GPGPU-Sim. 
+
+We analyze the amount of memory reuse that is available in the RTAO compute kernels. Memory reuse is defined as the amount of memory addresses that are accessed more than once during the duration of the execution of the kernels.
+
+~\autoref{tab:DRAM_save} shows the amount of fewer DRAM accesses if the entire Dragon scene would fit into the L2 cache. We differentiate between perfect ray sorting, whereby rays are sorted by origin and direction to maximize ray locality and random ray ordering, whereby rays are randomly shuffled before being traced to minimize ray locality. 
+This limit study gives an upper bound on how many DRAM accesses can be saved if the L2 cache was perfect. From~\autoref{tab:DRAM_save} we see that if the rays are perfectly sorted, a practically impossible scenario, we can save up to 6X the amount of DRAM accesses because of cache hits. If the rays are randomly shuffled, a much more realistic scenario for modern divergent raytracing workloads, we can save up to 8.5X the amount of DRAM accesses.
+
+~\autoref{tab:DRAM_save} therefore demonstrates that there is significant room for optimization in reducing the overall DRAM accesses in raytracing applications. 
+
+
+\begin{table}[t]
+\centering
+\begin{tabular}{ |c||c|c|  }
+ \hline
+ Ray order & Perfect Ray sorting & Random Ray sorting \\
+ \hline
+    Fewer DRAM accesses  & 6X   &  8.5X \\
+  \hline
+ \end{tabular}
+\caption{\label{tab:DRAM_save} Limit study of the amount of DRAM accesses saved with perfect L2 cache}
+\end{table}
+
+Finally, we further analyze the distribution of memory addresses that exhibit the highest amount of reuse. A memory address exhibits high amounts of reuse if it is accessed over and over. A perfect cache would result in a cold miss in the first access and all subsequent accesses would result in cache hits.
+Using GPGPU-Sim we log all memory addresses at the LDST queue and record which addresses are accessed how often. 
+~\autoref{fig:memory_reuse_progression} shows the classification of the most reused memory addresses into the buffers from ~\autoref{subsec:mem_classification}. For example, we plot the distribution of the top 1\% in memory addresses in~\autoref{custom:a}. We can see that the 1\% of all addresses that are being reused all belong to the BVH data structure. This indicates that the best utilization of the cache hierarchy is to store the BVH acceleration structure. In~\autoref{custom:b} we show the distribution of the 5\% most reused memory addresses. We can see that while most of these accesses are for the BVH acceleration structure, some heavily reused addresses are for the triangle primitives. 
+
+We therefore conclude that a lot of memory address locality goes lost during raytracing applications because of conflict misses in the cache hierarchy. 
+
+\begin{figure}[htb]
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{dragon_top_1.png}
+  \caption{\label{custom:a}1\%}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{dragon_top_5.png}
+  \caption{\label{custom:b}5\%}
+  \end{subfigure}
+  \qquad
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{dragon_top_10.png}
+  \caption{10\%}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+   \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{dragon_top_20.png}
+  \caption{20\%}
+  \end{subfigure}
+  \qquad
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{dragon_top_30.png}
+  \caption{30\%}
+  \end{subfigure}
+  \hspace*{\fill} % separation between the subfigures
+  \begin{subfigure}{0.49\textwidth}
+  \includegraphics[width=\linewidth]{dragon_top_40.png}
+  \caption{40\%}
+  \label{subfig:san_mig_ao}
+  \end{subfigure}
+  
+  \caption{\label{fig:memory_reuse_progression}
+           Memory reuse study: Amount of memory reuse in the top X\% of
+           }
+\end{figure}

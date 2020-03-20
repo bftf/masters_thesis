@@ -1,0 +1,63 @@
+\section{Hash-Based Ray Path Prediction}
+\label{sec:HRPP_idea}
+
+%%%
+%%% Figure 1
+%%%
+\begin{figure}[htb]
+  \centering
+  % the following command controls the width of the embedded PS file
+  % (relative to the width of the current column)
+  \includegraphics[width=0.7\linewidth]{idea}
+  % replacing the above command with the one below will explicitly set
+  % the bounding box of the PS figure to the rectangle (xl,yl),(xh,yh).
+  % It will also prevent LaTeX from reading the PS file to determine
+  % the bounding box (i.e., it will speed up the compilation process)
+  % \includegraphics[width=.95\linewidth, bb=39 696 126 756]{sampleFig}
+  %
+
+  %
+  %\parbox[t]{.9\columnwidth}{\relax
+  %         For all figures please keep in mind that you \textbf{must not}
+  %         use images with transparent background! 
+  %         }
+  %
+\caption{\label{fig:idea}
+           Binary BVH Acceleration Structure augmented by HRPP. The interior nodes are represented by their bounding boxes. Leaf nodes have both bounding boxes and triangular scene geometry. HRPP additions are marked in green. The red arrows represent the control flow from root to leaves through HRPP}
+\end{figure}
+
+\subsection{Overview}
+Figure~\ref{fig:idea} shows an example of a binary BVH tree used in PBRT and Aila's GPU raytracer. 
+
+The traversal of rays through the acceleration structure starts at the ray pool which dynamically collects all the rays to be traced throughout the rendering process. Once the rays exit the ray pool, they are traced through the BVH tree in a top-down fashion. On the CPU, ray traversal bundles each group of rays in packets for SIMD parallelized traversal~\cite{Wald07simdray}. On the GPU, rays are bundled into much wider packets called warps, which match the underlying architecture of GPUs~\cite{Aila:2010:ACT:1921479.1921497}.
+
+A ray that intersects with the scene geometry has to traverse up to the full depth of the tree before calculating any scene intersections. Traversing interior-nodes, performing ray-box intersections along the way, is a costly operation that does not provide any merit other than guiding rays to leaf nodes where the essential scene intersections take place.
+
+Shadow Rays follow the `hit-any' paradigm, whereby they search for any scene intersection. Most other rays, however, need to determine the closest intersection to the ray's origin and, therefore, follow the `hit-all' paradigm. 
+
+If two rays exhibit locality they are mapped to similar leaf nodes. Trivially, primary rays all start at the camera and their directions remain similar; consequently, primary rays are highly coherent and exhibit locality with each other. 
+
+Subsequent rays, such as reflections rays, shadow rays, and incoherent global illumination rays also exhibit locality. Many secondary rays, which have originated from distinct primary rays, intersect with similar surfaces in the scene or are traced towards similar light sources. Even seemingly incoherent rays can show similarity with other incoherent rays throughout the rendering of a frame. This type of locality, which goes beyond primary rays, is unexploited in today's raytracers.
+
+
+\subsection{Hash-Based Ray Path Prediction (HRPP)}
+HRPP skips traversal operations by predicting ray paths. HRPP predicts which nodes a ray is likely to intersect based on information gathered from previous similar rays.
+
+HRPP's direct flow guides rays directly from the ray pool towards the leaf nodes as shown in Figure~\ref{fig:idea} by dashed red lines. Rather than letting rays enter the acceleration structure via the ray pool, HRPP computes a ray's hash value. The hash function employed by HRPP uses the ray's physical properties of origin and direction to associate a unique number with each ray. This number serves as a lookup index into HRPP's predictor table. Hash functions are discussed in more detail in Section~\ref{hash}.
+
+Once rays are hashed, the predictor table serves as a storage of mappings from unique ray hash values to node indices which can be used as pointers into the tree. 
+
+Before any ray enters the tree, a ray's hash value is computed, followed by a lookup in the predictor table. If the hash value is present in the table, a prediction for the ray is made. The prediction is then evaluated. If the evaluation results in a valid scene intersection, the traversal of all interior nodes is skipped. Otherwise, the ray is added back into the ray pool and traverses the tree as it would without HRPP.
+
+The predictor predicts either a leaf node or an interior node, as is illustrated in Figure~\ref{fig:idea}. When an interior node is predicted, the ray has to traverse the interior layers preceding the target leaf node.
+
+\subsection{Precision and Recall}
+As stated in the previous section, HRPP prediction can either hit or miss the target leaf node. We intuitively define HRPP hits as positive predictions, and HRPP misses as negative predictions. We further differentiate between four scenarios, true positives, false positives, true negatives, and false negatives. We will discuss how each of these scenarios can happen and how to deal with them to guarantee correctness.
+
+True positives occur when a ray hits in the predictor and the prediction is deemed correct after evaluation. A prediction is determined to be correct when a ray-scene intersection is found in the predicted leaf node.  This is the best-case outcome, whereby the traversal of the tree is successfully skipped. It is to be noted, however, that there is a slim possibility of a true positive leading to the wrong visual output, as in the case where the ray is required to find the closest intersection, e.g the `hit-all' paradigm. Prediction can cause a ray to not find the closest intersection. This problem is inexistent for `hit-any' rays such as shadow rays. 
+
+On the other hand, false positives occur when a ray hits in the predictor table but the prediction made by HRPP is incorrect. Upon a predictor hit, the ray is tested against the geometry in the predicted node(s). If the ray misses in the node(s), the prediction is incorrect. In this case, the ray is added back into the ray pool and traverses the acceleration structure as it would without HRPP. The performance cost of a false positive is the cost of the lookup in HRPP and the cost of intersecting the triangles in the wrongly predicted leaf nodes. 
+
+True negatives and false negatives are similar to each other in the way that they simply miss in the predictor but they do so for different reasons. The reason for the miss for a true negative is that there was no chance a similar ray has been encountered previously. False misses occur when an entry has been evicted from the predictor. These misses could have been avoided by using an infinitely sized predictor table. Our current implementation lacks a replacement policy as we focus on evaluating the limits of our technique. We will therefore not differentiate between true negatives and false negatives. 
+
+The penalty for negatives is the cost of the predictor table lookup which includes the cost of computing the hash function. Once a ray has been established as being falsely predicted, it is re-added to the ray pool awaiting traversal through the tree.

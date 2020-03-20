@@ -1,0 +1,10 @@
+%% The following is a directive for TeXShop to indicate the main file
+%%!TEX root = diss.tex
+
+\chapter{Abstract}
+
+Hybrid rendering combines ray-tracing and rasterization graphics techniques to generate visually accurate photorealistic computer-generated images at a tight real-time frame rate. This thesis presents contributions to the field of hybrid rendering by introducing an open-source ray-traced ambient occlusion workload, by quantifying the performance tradeoffs of this workload and by evaluating one promising hardware technique to accelerate real-time raytracing.
+
+In this thesis, we introduce the first open-source implementation of a viewpoint independent raytraced ambient occlusion GPU compute benchmark. We study this workload using a cycle-level GPU simulator and present the trade-offs between performance and quality. We show that some ray-traced ambient occlusion is possible on a real-time frame budget but that the full quality effect is still too computationally expensive for today's GPU architectures.  
+
+This thesis provides a limit study of a new promising technique, Hash-Based Ray Path Prediction (HRPP), which exploits the similarity between rays to predict leaf nodes to avoid redundant acceleration structure traversals. Our data shows that acceleration structure traversal consumes a significant proportion of the raytracing rendering time regardless of the platform or the target image quality. Our study quantifies unused ray locality and evaluates the theoretical potential for improved ray traversal performance for both coherent and seemingly incoherent rays. We show that HRPP can skip, on average, 40\% of all hit-all traversal computations. We further show that the significant memory overhead, ranging on the order of megabytes, inhibits this technique from being feasible for current architectures.  

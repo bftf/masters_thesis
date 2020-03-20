@@ -1,0 +1,89 @@
+
+\section{HRPP Hash Function} \label{hash}
+Hashing is used to map ray properties to a unique value that serves as an index into the predictor table. In our case, a good hash function maps rays with similar properties to the same entry in the predictor table.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=1.0\linewidth]{Hash_precision}
+ 
+  \caption{\label{fig:IEEEmapping}
+           Illustration of our hash function's extraction of bits from IEEE 754 floating point with an example precision of 2 bits. Bits marked in green are included in the hash representation}
+\end{figure}
+
+Most path tracers encode ray origin and direction as single precision floating points encoded in the IEEE 754~\cite{1985--ieee754} floating point representation. HRPP's hash function extracts relevant bits from the IEEE754 floating point encoding to create a relevant hash index. 
+Furthermore, we propose to implement the hash encoder using a fixed function hardware block for maximal performance. Figure~\ref{fig:IEEEmapping} illustrates the proposed hash encoding using an example with a hash precision of 2 bits. In this example, the predictor index is composed of the sign bit and the 2 most significant bits from the exponent as well as the mantissa. A hash precision of 3 bits would be composed of the sign bit and 3 bits from each exponent and mantissa. 
+
+The same hash encoding is used for all 6 floats of each ray, where 3 floats are used for direction and 3 floats are used for origin. Finally, we swizzle origin hash values with direction hash values to obtain a unique predictor table entry that fits into at most 48 bits. The pseudo-code for the hash function is as follows:
+
+\begin{verbatim}
+// extract up to 16 bits from IEEE float representation 
+uint16_t hash_o_x = map_float_to_hash(ray.origin.x)
+/* repeat for all 6 floats */
+
+// xor the hashes to save space
+uint16_t hash_0 = hash_o_x xor hash_d_z;
+uint16_t hash_1 = hash_o_y xor hash_d_y;
+uint16_t hash_2 = hash_o_z xor hash_d_x;
+
+// form a unique index
+unsigned long long predictor_table_index = \
+    (hash_0 << 0) or \
+    (hash_1 << 8) or \ 
+    (hash_2 << 16);
+\end{verbatim}
+
+While this encoding minimizes hash conflicts, it deliberately does not avoid them; we want similar rays to result in hash conflicts by design.
+When encountering a hash conflict, the leaf node of the conflicting ray is inserted into the existing predictor entry. No predictor entry can hold duplicate nodes; therefore, the leaf is only inserted if it is not already present in the predictor entry. 
+
+\subsection{Hash function tradeoff}
+In this section, we discuss the tradeoff between using loose vs. tight hash functions.
+
+We define a hash function as loose if it maps too many rays to the same hash index. As a result, the number of false positives increases and the overall number of skipped computations decreases. A symptom of this is that the entries in the predictor table become long because the predictor table associates many distinct leaves with each hash index. On a predictor hit, a ray has to check against all nodes in the table entry. Long table entries result in a large amount of predictor induced overhead computation and few skipped nodes. 
+
+On the other hand, a tight hash function will only map rays to the same index if they are very similar. When using a tight hash function, HRPP uses significantly more memory due to a larger number of distinct hash values being stored in the predictor table. Tight hashing produces few positives and, as a result, few computations are skipped. The upside to a tight hash function, however, is that almost all positives are true positives.  
+
+%
+% RESULT TABLE -> moving up in the source code for layout 
+%
+
+\begin{table*}[t]
+\centering
+\begin{tabular}{ |c||c|c|c|c|c|  }
+ \hline
+ Scene & Teapot & Killeroo Simple & Killeroo Metal & Buddha & Sportscar\\
+ \hline
+ number of triangles              & 2k & 60k & 500k & 1mio & 53mio\\
+ lighting complexity              & simple & simple & complex & medium & complex\\
+ max BVH depth                    & 16 & 24 & 27 & 30 & 32\\
+ hit-any savings(\%)              & 4 & 48 & \textless1 & 23 & \textless1\\
+ hit-any predictor table size (MB)& 16 & 10.8 & 31 & 18 & 21\\
+ hit-all savings(\%)              & 69 & 52 & 30 & 41 & 32\\
+ hit-all predictor table size (MB)& 2 & 84 & 47 & 18 & 18\\
+ \hline
+\end{tabular}
+\caption{Evaluation of test scenes - resolution 1024$\times$1024 - 8 spp - Go Up Level 0 - hash precision 6}
+\label{tab:table_label}
+\end{table*}
+
+\begin{figure}[htb]
+  
+  \centering
+  \begin{tabular}[b]{c}
+    \includegraphics[width=.48\linewidth]{buddha_hash} \\
+    \small (a)
+  \end{tabular} \qquad
+  \begin{tabular}[b]{c}
+    \includegraphics[width=.48\linewidth]{buddha_avg_entries} \\
+    \small (b)
+  \end{tabular}
+
+  \caption{\label{fig:buddha}
+           Illustration of the tradeoff between a tight and a loose hash function and its impact on the predictor table properties. Buddha - 1024$\times$1024 - spp 8}
+\end{figure}
+
+
+Figure~\ref{fig:buddha} illustrates this tradeoff using the Buddha scene using PBRT with 8 samples per pixel at a resolution of 1024$\times$1024. The number of precision bits used in the hash function and the size of the predictor table is directly correlated as shown in Figure~\ref{fig:buddha} (a). In this particular example, the number of intersections skipped peaks at 5 bits.
+
+A hash function that is too tight (e.g. 6 bits and up) increases the size of the predictor table without additional computations skipped. 
+
+A hash function that is too loose (e.g 4 bits and below) produces a large number of hash conflicts. This is illustrated in Figure~\ref{fig:buddha} (b), where the average number of leaves per entry significantly increases to over 600 with a precision of 4 bits.

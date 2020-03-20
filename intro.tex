@@ -1,0 +1,875 @@
+%% The following is a directive for TeXShop to indicate the main file
+%%!TEX root = diss.tex
+\chapter{Introduction}
+\label{ch:Introduction}
+
+This thesis explores real-time rendering, the study of quickly producing visual content on a computer screen. We explore new avenues for increasing the image quality of rendered images without sacrificing interactive frame-rates needed for applications such as video games. This thesis proposes the first open-source ray-traced ambient occlusion benchmark using GPU compute kernels. We explore the memory and compute tradeoffs of ray-traced ambient occlusion on a cycle level GPU simulator. We finally propose and evaluate one promising extension to existing GPU hardware architecture to improve ray-tracing speed and efficiency. 
+
+This research is driven by the popularity of video games, and the discrepancy between the image quality in offline renderers and real-time applications. GPUs emerged in the 1980s as specialized graphics accelerators~\cite{McClanahan2011HistoryAE}. GPUs were a niche and expensive accelerator only used in highly specialized supercomputers consisting of a few thousand transistors. Nowadays, GPUs are widely popular. Commercial vendors like NVIDIA and AMD sell over 10 billion GPUs per year~\cite{GPU_sales}. The video game industry is expected to be worth over 90 billion dollars with 2.5 billion people playing video games worldwide~\cite{gaming_stats_website}.
+
+Mobile video games pose an even bigger challenge. Mobile games require real-time framerates without applying too much of a burden on the battery of a handheld device like phones or tablets. Mobile games have to be energy efficient to maximize battery life. Over 100 thousand publishers publish mobile game apps and over 2.4 billion people play mobile games~\cite{https://www.ironsrc.com/blog/mobile-gaming-industry-trends-in-2020/}. 
+
+Computer Graphics is the study of digitally synthesizing visual content. The generation of images on the computer dates back to the invention of Cathode-Ray tubes~\cite{cathoderaytube} and the digital display. The very first graphical applications consisted of the lighting of a single digitally controlled Cathode-Ray tube. The first interactive video game was a tennis game invented by physicist William Higinbotham~\cite{APS-physics}.
+
+The field of Computer Graphics has since come a long way. Most notably due to pioneers like Ivan Sutherland and David Evans. Sutherland won the Turing award for his invention of the graphics pipeline~\cite{sutherland1989sproull}; Evans innovated the field with his work on UNIX timesharing and the display as we know it today~\cite{10.1016/0263-7855(87)80030-9}.
+Arguably, the two most impactful advancements of graphics algorithms can be attributed to Ed Catmull for his work on the rasterization Z-buffer algorithm~\cite{10.5555/907242}, and the invention of the ray-tracing algorithm by Whitted~\cite{Whitted:1980:IIM:358876.358882} and Kay and Kajiya ~\cite{10.1145/15886.15916}. We discuss the Z-buffer algorithm in section~\autoref{sec:rasterization_intro}; ray-tracing is discussed in~\autoref{sec:rt_intro}.
+These algorithmic advances have introduced applications such as animated movies and complex interactive video games bringing joy to millions of people daily. Furthermore, graphical applications have contributed to a variety of fields outside of computer science such as medicine, data science, archaeology, and linguistics.
+
+Rendering images using modern computer graphics algorithms is compute and memory intensive. Efficient ways to process images have been heavily researched. Designated hardware to accelerate graphics algorithms has been researched alongside algorithmic advances since the inception of graphics. Nowadays, dedicated graphics hardware is ubiquitous in most consumer-facing devices such as smartphones, laptops, desktops and even data centers and supercomputers. Graphics Processing Units (GPUs), when used for graphics, almost exclusively accelerate the Z-Buffer rasterization algorithm. The rasterization algorithm is used in all modern real-time applications such as video games. GPUs have recently gained popularity in the acceleration of machine learning applications but they nonetheless include a significant portion of their die area to specialized graphics applications~\cite{NVIDIA-Turing}.
+
+The complexity of rendering gives rise to a fundamental tradeoff in computer graphics: quality vs speed. The highest quality images in computer graphics are achieved with state of the art commercial path tracers such as Pixar's Renderman~\cite{10.1145/3182162} or Disney's Hyperion~\cite{10.1145/3182159}. The render times of high quality, movie grade scenes are on the order of a day and can sometimes exceed weeks per frame. A cluster of computers computes each frame for multiple days and returns the result, a technique known as offline rendering. 
+Path tracers, which rely on the ray-tracing algorithm, are becoming increasingly complex; novel research into rendering advanced visual effects such as transparent and translucent volumes, fur and global illumination add complexity and compute time to each frame.
+Game engines, on the other hand, have a hard requirement on runtime. For a game to appear reactive, smooth and enjoyable to the player a framerate of 60 frames per second (FPS) has to be enforced. This is achieved by reducing the quality of the image and by applying simplifications and approximations of complex visual effects. Rendering at interactive framerates is known as online rendering. Most online renderers, such as Unity Engine~\cite{unitygameengine} and Unreal Engine~\cite{10.5555/3099885}, rely on the rasterization algorithm. 
+
+As a general rule for runtime complexity, one can approximate ray-tracing to scale linearly with the number of samples used and rasterization to scale linearly with the number of primitives in the scene. 
+
+Hybrid rendering is a novel field of research that seeks to combine both raytracing and rasterization in real-time applications that have recently emerged. Hybrid rendering seeks to add high quality raytraced visual effects into rasterized frames to achieve superior image quality at real-time frame rates; it is discussed extensively in section~\autoref{sec:hybrid_intro}. Most of the work in hybrid rendering focuses on algorithmic improvements~\cite{Barre_Brisebois2019}, however, very little academic research has been done on integrating raytracing specific hardware acceleration into rasterization based GPUs.
+
+\section{Contributions}
+\label{ch:Contributions}
+
+The popularity of video games is motivating us to research new ways to improve the quality of the gaming experience. Gamers enjoy the high visual quality of the rendered images at fast and smooth framerates. Adding in the additional constraint of energy conservation for hand-held devices, real-time graphics poses a difficult challenge for both computer software and hardware architects.
+
+In this thesis, we explore the bottleneck of real-time raytracing by focusing on current GPU architectures. We resist the temptation to consider specialized raytracing architectures and rather seek to integrate a limited version of raytracing hardware support into rasterization based accelerator chips following the hybrid rendering paradigm.
+
+In this thesis we present:
+\begin{itemize}
+  \item An open-source implementation of a Ray-Traced Ambient-Occlusion benchmark for use as a hybrid rendering workload
+  \item The first evaluation of the memory behavior of current SIMT Compute raytracing of the highly divergent RTAO benchmark on current GPU architectures
+  \item We propose a novel approach to accelerate BVH traversal by predicting; we show a possible reduction of 40\% in interior node computations in theory, but we conclude that the feasibility our approach is low due to significant memory overhead
+\end{itemize}
+
+\section{Outline}
+\label{sec:Outline}
+
+We discuss relevant background information in~\autoref{sec:Background}. We discuss the difference between rasterization graphics, ray tracing, and hybrid rendering. We further discuss the current state-of-the-art in GPU raytracing and recent advancements of real-time GPU raytracing. We introduce the Ambient Occlusion effect in~\autoref{sec:ao_intro}.
+
+~\autoref{ch:ao} introduces our GPU ray-traced ambient occlusion benchmark. We document the setup of the benchmark and the relevant code snippets in ~\autoref{sec:ao_benchmark_intro_inline}, we then evaluate the performance of the benchmark in ~\autoref{sec:visual_ao} and finally discuss the memory behavior results from a cycle-level GPU simulator in ~\autoref{sec:mem_behavior_performance}.
+
+~\autoref{ch:hrpp} introduces our attempt at introducing a new hardware accelerator to improve both the performance and the energy efficiency of ray tracing applications. Hash-Based Ray Path Prediction aims at skipping computation by doing a lookup, the employed method is introduced in~\autoref{sec:HRPP_idea}. We evaluate our approach in~\autoref{sec:hrpp_res} and show that it is not suited for current GPU architectures due to significant memory overhead.
+
+We conclude this thesis in~\autoref{ch:Conclusion} by summarizing our findings and point to future work that needs to be done on the topic of real-time hybrid rendering.
+
+
+\chapter{Background}
+\label{sec:Background}
+
+\section{Rasterization}
+\label{sec:rasterization_intro}
+
+Real-time graphics applications such as video games rely on Catmull's Z-buffer algorithm~\cite{10.5555/907242}, also know as the rasterization algorithm or depth buffer algorithm. The Z-Buffer algorithm converts 3D primitives such as triangles into 2D points on the screen. This is done by linear transformations such as the Model-View-Projection (MVP) matrix and the screen-space transformation.
+Once the primitives are in screen space, their surface is attributed to each pixel and the closest fragment is stored in the Z-Buffer. The closest fragment is then shaded to determine the final color of the pixel. 
+
+\begin{figure}
+\centering
+\begin{subfigure}[t]{.45\textwidth}
+  \centering
+  \includegraphics[width=0.95\linewidth]{rasterization_3d}
+  \caption{3D representation of scene and its projection onto the display} 
+  \label{fig:rasterization_intro_fig_a}
+\end{subfigure}%
+ \hfill
+\begin{subfigure}[t]{.45\textwidth}
+  \centering
+  \includegraphics[width=0.95\linewidth]{rasterization_2d}
+  \caption{2D representation of the final scene on the display}
+  \label{fig:rasterization_intro_fig_b}
+\end{subfigure}
+\caption{\label{fig:rasterization_intro_fig}
+           Rasterization graphics projects the primitives onto the screen using the orthographic Model View Projection (MVP) matrix. }
+\end{figure}
+
+~\autoref{fig:rasterization_intro_fig} illustrates a simplified version of the rasterization algorithm. The scene that a user wants to render is given as a list of triangle primitives, also known as a mesh. Each primitive is then projected by the MVP matrix. The closest fragment for each pixel is determined and shaded to be displayed on the screen as shown in~\autoref{fig:rasterization_intro_fig_a}. In a step called rasterization, each pixel on the screen that is affected by the projected triangles is shaded according to the triangle's specification. The shading operation takes into account lighting, material and texture properties of the corresponding primitive. The final result is then written to the framebuffer as shown in~\autoref{fig:rasterization_intro_fig_b}. Because of the properties of the display, each pixel on the screen can only have one color which gives rise to unwanted artifacts like aliasing, e.g. the rugged edge of the triangle in~\autoref{fig:rasterization_intro_fig_b}.
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.95\linewidth]{OGL_pipeline}
+ 
+  \caption{\label{fig:OGL_pipeline} The Open-GL pipeline as implemented on most dedicated graphics processing units~\cite{kronosgl:2017, 10.1145/3307650.3322221}}
+\end{figure}
+
+~\autoref{fig:OGL_pipeline} illustrates the sequential steps the geometry goes through in the rasterization pipeline as implemented on modern GPUs. The scene, consisting of triangle primitives, is passed as the input. The rasterization pipeline operates on each triangle independently, making the processing of triangles independent and therefore parallelizable. 
+
+The input to the rasterization pipeline is a list of primitives; triangles are most common but lines and quads are supported. Each primitive is transformed in the programmable vertex shader, the MVP projection to screen-space happens in this stage. The programmer supplies a programmable shader as a code snippet which is then compiled and executed on the GPU cores. Shader code is C-like, OpenGL's shader language is GLSL. 
+After each vertex passed the vertex shader, the optional tesselation stage breaks up large triangles and other primitives into smaller, more manageable triangles which increase temporal and spatial locality during rendering. Furthermore, the tessellation can add improved geometrical complexity to models. Tesselation is a relatively new addition to OpenGL and happens in 3 distinct stages, some programmable and some fixed-function stages. 
+The geometry shader is a rarely used shader stage that allows for procedural on-the-fly geometry generation.
+After the geometry stage, the rasterization stage is executed. Rasterization breaks up large triangles into fragments. Each fragment is assigned to one pixel on the screen. 
+Finally, the fragments are shaded in the fragment shader. The fragment shader assigns a color to each fragment based on lighting calculations and often multiple texture lookups. The bulk of the work in real-time game engines is done in this stage. Fragment shaders are often complex and each commercial game requires a large amount of fragment shader code to account for all the variations in lighting, models, and textures. 
+For a more in-depth discussion of the OpenGL pipeline we refer to~\cite{kronosgl:2017, 10.1145/3307650.3322221}.
+
+The independence of primitives throughout the pipeline is the key factor for the success of rasterization. Each primitive can be computed independently of all other primitives. The only point of synchronization in the rasterization pipeline is the framebuffer. Multiple fragments may want to write to the same entry in the framebuffer and either need to be blended or rejected based on depth (Z-value). Framebuffer synchronization is handled in hardware in distinct units called early-Z rejection and late-Z rejection~\cite{10.1145/3307650.3322221}. Hardware synchronization abstracts any constraints away from the programmer and ensures parallelization. Parallelization guarantees near full GPU utilization and high render speeds. 
+
+Due to the independence of primitives, the rasterization algorithm lends itself well to parallelization and fits the Same Instruction Multiple Data (SIMD) compute model of the GPU. The architecture of the GPU is built around many thousand in-order cores. The cores do not execute out-of-order like most CPUs do and therefore weaker and have higher latency than the CPU cores. The GPU, however, is optimized for throughput. During rasterization the cores of the GPU can be kept busy, GPUs can save OpenGL context and switch between them to hide the latency of memory fetches. 
+Rasterization is efficient in terms of memory reuse and therefore utilizes the cache hierarchy of the GPUs well. Rasterization both exploits spatial locality and temporal locality in texture fetches. Two neighboring fragments are likely to fetch from the same texture and therefore generate highly localized texture fetches which result in cache hits and therefore fast performance~\cite{10.1145/37402.37414}.  
+
+GPU architecture has been adapted for the rasterization pipeline with many dedicated hardware blocks such as clipping, culling, early-Z and late-Z blocks in addition to the tessellation and rasterization blocks~\cite{10.1145/3307650.3322221}. The vertex, fragment and compute shaders are run on the SIMT cores of the GPU.
+
+While the rasterization algorithm can render vast worlds at real-time speed, it suffers from restrictions. True global illumination is impossible to solve in the rasterization paradigm. Global illumination is the calculation of emitted light at each point in space, taking into account effects such as shadowing, translucency, and transparency. As per the rendering, equation introduced in~\autoref{sec:rt_intro}, true global illumination is computed over every possible light direction and therefore depends on potentially every other primitive in the scene. This violates the independence of primitives assumption rasterization relies upon. 
+
+Game developers have come up with ways to approximate the shortcomings of the rasterization algorithm while maintaining real-time performance. Techniques such as light-maps~\cite{10.1145/3102163.3102202}, cascaded shadow-maps~\cite{article_shadow_maps}, and, screen-space effects~\cite{10.5555/1407436} have been introduced. Screen-space effects are localized effects that are only applied to the geometry visible on the screen. Oftentimes they are a post-processing effect that operates on the framebuffer after the framebuffer has been composed by the rasterization pipeline. The most relevant of these screen-space effects for this thesis is Ambient Occlusion. Screen-space effects sacrifice valuable render-time but fail to account any information beyond the screen which results in unrealistic effects.
+Despite these efforts, the visual quality of images rendered by rasterization lags behind the quality of images rendered via the ray tracing algorithm. 
+
+\section{Ray-Tracing}
+\label{sec:rt_intro}
+
+Ray-Tracing is a rendering algorithm first introduced by Whitted~\cite{10.1145/358876.358882} and then refined by Kay and Kajiya in~\cite{10.1145/15886.15916}. Ray-Tracing seeks to imitate the physical properties of light by following light paths which start at a light source and illuminate the scene. The physical properties of light, as described in~\cite{Pharr:2010:PBR:1854996}, make this a complex process. Light refracts and diffracts depending on surface properties, light scatters in many directions, sometimes objects even occluding themselves. Advanced effects such as shadowing, volumetrics, and sub-surface scattering have to be taken into account when modeling light transport.
+
+In practice, ray-tracing is done by generating a ray per pixel, originating at the camera directed into the scene as shown in~\autoref{fig:raytracing_intro_fig}. 
+Rays are defined by an origin point in 3D space $O$, a direction vector $d$ such that:
+\begin{equation}
+\label{eq:ray_equation}
+  P = O + td
+\end{equation}
+where $t$ is the ray extent. The Ray extent is bound by: $t_{min} <= t <= t_{max}$.
+
+Ray's imitate the movement of photons as they are traced in a straight line. Primary rays originate at the camera and are traced into the scene as shown in~\autoref{fig:raytracing_intro_fig}. The intersection of the ray and the geometry is determined. Then secondary rays are spawned. The direction of the secondary rays depends on the properties of the material the primary ray has intersected with and the probabilistic distribution function that is used as described in in~\cite{Pharr:2010:PBR:1854996}. Secondary rays are then intersected with the geometry of the scene before spawning further rays. A ray can be terminated when either a maximum number of bounces has been achieved, when the ray misses all geometry and leaves the scene or, when the ray is stochastically terminated.
+At each intersection with geometry shadow rays (not shown in ~\autoref{fig:raytracing_intro_fig} for simplicity) are spawned. Shadow rays determine a direct connection between a surface point and a light source, the result is used in the lighting calculation for the shadow effect.
+
+\begin{figure}
+\centering
+\begin{subfigure}[t]{.45\textwidth}
+  \centering
+  \includegraphics[width=0.95\linewidth]{raytracing_intro}
+  \caption{3D representation of scene and the propagation of 2 sample rays and 2 corresponding secondary rays} 
+  \label{fig:sub1}
+\end{subfigure}%
+ \hfill
+\begin{subfigure}[t]{.45\textwidth}
+  \centering
+  \includegraphics[width=0.95\linewidth]{raytracing_intro_2d}
+  \caption{Result of the 2 rays on the display}
+  \label{fig:sub2}
+\end{subfigure}
+\caption{\label{fig:raytracing_intro_fig}
+           Raytracing traces ray into the scene which is intersected with the geometry and launches secondary rays }
+\end{figure}
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=0.9\linewidth]{BVH_intro}
+ 
+  \caption{\label{fig:BVH_intro}Bounding Volume Hirarchy (BVH) traversal and intersection}
+\end{figure}
+
+Every ray that is traced in the scene needs to determine where the ray intersects the geometry of the scene. This is referred to as "traversal and intersection", see~\autoref{fig:BVH_intro}.
+Inefficient traversal and intersection would check each primitive for an intersection of the ray. Then it would sort the intersection hit points based on the distance to camera to chose the closest hit point. The runtime of this naive algorithm is $O(n)$, where $n$ is the number of primitives in the scene. 
+A more efficient way to compute the traversal and intersection operation is by using a traversal acceleration structure such as a Bounding Volume Hierarchy (BVH). The BVH is a spatial tree data structure that is built around the scene and composed of ever-tighter bounding volumes. Other traversal structures such as kd-trees~\cite{10.5555/3044805.3044826} and octrees~\cite{10.5555/2421196.2421200} are possible but are not widely used for GPU raytracing. 
+The root of the BVH tree encompasses the entire scene, the leaves of the tree are composed of a small number of scene primitives. The interior nodes are composed of water-tight axis-aligned bounding boxes~\cite{Pharr:2010:PBR:1854996}.
+The BVH needs to be constructed only once per scene. Traversing the BVH is of runtime $O(log(n))$, where $n$ is the number of primitives in the scene.
+
+~\autoref{fig:BVH_intro} shows the traversal and intersection algorithm using a BVH. During traversal and intersection each ray follows 3 steps: \circled{1} Ray-generation, \circled{2} interior node intersection and \circled{3} leaf intersection. 
+\circled{1} illustrates the process of ray-generation. Each primary ray originates at the camera and is given a direction and an extent. When rays are traced they spawn new rays such as shadow rays and secondary rays. In GPU raytracers~\cite{10.5555/1921479.1921497, 10.1145/3105762.3105773} once the rays are generated they are stored in a ray-pool in global memory. The ray-pool oftentimes contains over a million rays that are waiting to be traced. 
+The rays are loaded from memory in \circled{1}, they are either packaged into warps on the GPU or ray-packets on the CPU before the BVH traversal starts. It is possible, and necessary, to sort rays before packaging them. Sorting rays is essential to assure good performance and low divergence during traversal~\cite{article_Garanzha, 10.5555/1921479.1921497}.
+
+\circled{2} illustrates the interior node traversal. The root node encompasses the entire scene and assigns a watertight axis-aligned bounding-box (AABB). AABB's store the bounding box information in as little as 6 floating-point values: ($x_{min}$, $y_{min}$, $z_{min}$) and ($x_{max}$, $y_{max}$, $z_{max}$). Intersecting a ray with an AABB bounding box is a trivial operation and can be done in much fewer instructions than intersect a ray and a triangle.
+The implementation of one possible ray-AABB intersection routine is discussed in~\cite{2005iv}. During intersection, it is only determined whether the ray intersects the AABB but the exact intersection point is not relevant, further simplifying the computation. 
+If a ray intersects an AABB the ray is tested against the node's children. If the node's children are interior nodes, step \circled{2} is repeated. If one of the children is a leaf, the ray moves to step \circled{3}.
+Early rejection of a ray is common in traversal and intersection. If a ray fails to intersect with any AABB at a given level of the BVH tree, it is guaranteed that the ray does not intersect any geometric primitives in the scene and therefore results in a miss. 
+
+\circled{3} illustrates the leaf intersection. Once a ray has passed to the leaf nodes, the intersection step happens. The leaf nodes contain geometric primitives from the scene. During BVH construction, a fixed number of primitives are packaged into each leaf node. The rays that intersect a leaf need to compute the intersection point with each primitive in the leaf. An algorithm to intersect a ray with a triangle is discussed in~\cite{2005iv}. If multiple intersections are found, the closest intersection is returned. This requires an additional sorting step per leaf node as well as an additional sorting step across leaf nodes. 
+
+There are 2 types of rays during the raytracing operation: closest-hit rays and hit-any rays. Closest-hit rays are used for primary and secondary rays, these rays need to find the closest intersection to the ray-origin and therefore require ordered traversal through the BVH. Hit-Any rays on the other hand simply determine whether the ray intersects the scene or not. They do not require finding the closest intersection and omit the sorting step required in closest-hit rays. 
+
+The biggest knob for quality in ray-tracing applications is the samples per pixel (SPP) count. Tracing a single ray per pixel only explores one possible light path. This produces a noisy and incomplete image. To decrease the amount of noise and increase the visual accuracy of the rendered image, more SPPs are chosen. Production-based movies generally trace 2048 SPPs, while the smallest ray-tracing applications trace \(\frac{1}{4}\)\textsuperscript{th} SPPs.
+
+The strength of ray-tracing is that it takes into effect truly global light transport. Unlike the screen-space approximations discussed in~\autoref{sec:rasterization_intro}, ray-tracing does not suffer from excluding any information not present on the scene, yielding higher visual quality. Each ray can potentially touch every aspect of the scene and in no determined order. This is a challenge for current memory systems. Ray-tracing does not exploit temporal and spatial locality.
+
+Rays are considered coherent if two rays have similar origin and direction. Coherent rays exploit the cache hierarchy, they will touch similar geometry with similar materials and similar textures. Divergent rays are rays that have distinct origins and distinct directions, these rays pose a significant performance burden because the current memory system of CPUs and GPUs is not well suited to accommodate such rays ~\cite{demoullin2019hashbased}.
+
+\section{Hybrid rendering}
+\label{sec:hybrid_intro}
+
+Hybrid rendering combines ray-tracing and rasterization graphics techniques to generate visually accurate photorealistic computer-generated images at a tight real-time frame rate.  Raytracing~\autoref{sec:rt_intro} excels at computing photorealistic images by allowing for reflection and refraction rays. Raytracing enables true global illumination in computer-generated images by imitating how light propagates in the real world. However, tracing rays is very expensive both in terms of energy consumption and render time~\cite{10.1111/cgf.12458}. 
+
+Rasterization~\autoref{sec:rasterization_intro} on the other hand sacrifices some visual quality for render speed. Rasterized images achieve a relatively high degree of visual accuracy in real-time. Rasterization is primarily used in the video game industry where 60 frames per second rate are needed to achieve smooth gameplay. Raster-based rendering has benefited from custom-tailored, ever-evolving, the hardware architecture of Graphics Processing Units (GPUs).
+
+Recent advances in GPU architecture have incorporated ray-tracing elements into current rasterization based GPUs~\cite{10.1145/2492045.2492057, Parker_optix:a}. Graphics APIs such as NVIDIA's OptiX~\cite{Parker_optix:a} or Microsoft's DXR expose raytracing capabilities to real-time graphics applications.  While the current state of GPU hardware does not yet allow full images to be raytraced in real-time~\cite{10.5555/1921479.1921497}, it appears there will be an industry trend towards combining some form of partial ray-tracing with rasterization based graphics. This combination is typically referred to as hybrid rendering.  To date, very little academic research has explored the design space of hybrid rendering.
+
+One foray into hybrid rendering was done by EA's Project PICA PICA~\cite{Barre_Brisebois2019}. Raytracing effects such as transparency, translucency, shadows, ambient occlusion and global illumination were implemented on top of a state-of-the-art commercial game engine. Unfortunately, the source code is closed source and heavily relies on Microsoft's DXR API which is a closed source API. While PICA PICA describes how to implement hybrid raytracing algorithmically, it does not allow for detailed profiling and is, therefore, ill-suited as a tool for academic research. 
+
+\section{Real-Time Raytracing}
+\label{sec:gpu_intro}
+
+Real-time raytracing has been the holy grail of graphics since the invention of ray-tracing but remains unachieved.
+In this section, we document previous efforts to introduce real-time raytracing and their shortcomings.
+
+\subsection{CPU Ray-Tracing}
+
+CPUs are the default processing unit for raytracing. Open-Source raytracers such as PBRT~\cite{Pharr:2010:PBR:1854996} and Mitsuba~\cite{10.1145/3355089.3356498} rely solely on CPUs and do not provide a GPU backend. They are nonetheless parallelized by taking advantage of multiple CPU cores and the SSE extensions to the x86 instruction set. CPUs are widely used int the movie and VFX industry because of their programmability and the ease of use.
+
+Commercial frameworks such as Intel's OSPRay~\cite{10.1109/TVCG.2016.2599041} take advantage of the SIMD nature of the CPU cores to improve raytracing runtime. OSPRay is heavily used as a tool for visualization while Intel's Embree API~\cite{10.1145/2601097.2601199} provides the state-of-the-art in CPU raytracing with near-real-time frame rates for simple scenes.
+
+Wald et al.~\cite{article} speed up CPU raytracing by combining rays into coherent ray-packets~\cite{4634619, article_gunther_popov, article_benethin_boulos} which have similar origins and directions and map to the SSE lanes of the CPU. This technique takes advantage of the limited parallelism of the CPU to trace coherent rays and to reduce the memory overhead from fetching scene data.
+Rays become incoherent as they bounce around the scene which is detrimental to the performance of packet tracing. Further schemes that dynamically break and reorganize packets have been proposed by Boulos et al~\cite{boulos:07:Packet, inproceedings}.
+
+Another avenue of active research on CPU raytracing is raytracing on a cluster~\cite{inproceedings_mache_broadhurst, inproceedings_ize_brownlee}. A cluster is a combination of multiple compute nodes. The ray-tracing computation is split up among the nodes and the final result is combined once all the nodes have completed their respective chunk of the overall workload. Ray-tracing lends itself well to parallelization. Rays are independent of each other. Nonetheless the splitting up of work among clusters is non-trivial: memory overhead and compute overhead between nodes are the bottleneck for performance ~\cite{EGPGV:EGPGV12:061-070, wald2001interactive, doi:10.1111/1467-8659.t01-2-00710}. 
+
+\subsection{GPU Compute Ray-Tracing}
+
+~\cite{article_purcell} were the first to parallelize raytracing applications on a stream processor, to integrate raytracing into commercially available GPUs. With the rise of programmable GPU cores~\cite{Purcell:2002:RTO}, raytracing speed on GPUs surpassed raytracing speed on CPUs for the first time ~\cite{10.1145/566654.566640, 10.1145/2447976.2447997}.
+
+GPU compute gave rise to two distinct approaches of how to parallelize ray-tracing: ray-to-thread mapping and thread-to-node mapping.
+
+The ray-to-thread mapping was popularized by Aila et al.~\cite{10.5555/1921479.1921497, 10.1145/1572769.1572792}, this techniques maps one ray to each thread. GPUs operate on thread groups, or warps, of 64 threads. Aila et al. propose to map 64 threads into one thread group and let them compute the traversal and intersection computation in parallel. In their work, the acceleration structure is chosen to be a binary BVH. The implementation relies on CUDA compute kernels with persistent threads. 
+This approach was later extended by Ylitie et al.~\cite{10.1145/3105762.3105773} who show significant performance improvements by increasing the branching factor of the BVH to 8. Furthermore, Ylitie et al. propose a mechanism for dynamically fetching new work which better load-balances the GPU compute units.
+
+The thread-to-node mapping was introduced by Garanzha and Loop~\cite{article_Garanzha} and relies on each thread intersecting one node of the acceleration structure. The control code in this approach becomes increasingly complex as the traversal proceeds throughout the tree~\cite{10.1145/3105762.3105773}. Furthermore, this approach requires sorting from front-to-back of the child bounding boxes to assure correctness.
+
+Efficient mapping of the acceleration structure used in raytracing to GPU memory is an active area of research. Kd-trees gained popularity for raytracing in early resarch~\cite{10.1145/1071866.1071869} but lately BVH trees have dominated~\cite{Aila:2009:UER:1572769.1572792}. Ylitie et al.~\cite{10.1145/3105762.3105773} greatly compressed the traffic associated with interior root nodes. Nonetheless, GPU raytracing remains memory bound for large scenes due to high demands for scene memory traffic and acceleration structure traffic as demonstrated in~\autoref{ch:ao}.
+
+\subsection{Custom raytracing hardware}
+Various custom FPGA and ASIC implementations of custom raytracing chips have been proposed such as RPU~\cite{article_woop_rpu} and T\&I Engine~\cite{10.1145/2070781.2024194}. 
+
+Recent research work on real-time raytracing has proposed a custom Multiple-Instructions Multiple Data (MIMD) compute paradigm~\cite{Kopta-ICCD10}. MIMD does not suffer from the same lock-step execution restrictions as SIMD compute architectures like CPUs.
+The MIMD paradigm has shown some promise in reducing the energy requirement for raytracing by scheduling and pre-fetching memory accesses~\cite{Spjut-SHAW12, Shkurko:2017:DSH:3105762.3105771, Vasiou2019}. The closed-source nature of the simulator~\cite{Shkurko:2017:DSH:3105762.3105771} used for these works makes this avenue of research impossible to pursue. 
+
+While the performance and the power efficiency of these custom implementations largely exceed those of GPUs and CPUs, they have not yet found widespread adoption in commercial applications.
+
+\section{Ambient Occlusion}
+\label{sec:ao_intro}
+
+Ambient Occlusion (AO), the measure of how exposed each point is to ambient lighting, is a technique heavily used in Computer Graphics.
+This effect is a vital visual effect in both real-time applications such as video games and offline rendering applications such as movie frames~\cite{Pharr2019}. Without AO, Computer generated images appear flat and unrealistic to the human eye. Ambient Occlusion imitates a natural light phenomenon that can be observed all around us, one good example of the presence of ambient occlusion is the creases on a human's forehead or the folds below a human nose. These naturally occurring troughs prevent ambient lighting from entering the troughs and therefore appear darker in color then points on a flat surface that is exposed to direct ambient lighting. 
+
+Raytracing applications do not require to take into account ambient occlusion. The natural propagation of light gives rise to the AO phenomenon. Raytracing imitates the natural propagation of light and therefore renders the AO effect naturally, as part of the rendering process. Rasterization does not naturally take AO into account. Real-time graphics developers have resorted to adding the AO effect as a post-processing step to increase realism of the final output. 
+
+Real-time ambient occlusion has been a much-researched topic in recent years~\cite{10.5555/2383795.2383810, 10.1145/2448196.2448214, article_o_whatever_again, article_ao_whatever}. The requirements for 60 fps often found in the video game industry created the demand for real-time ambient occlusion. Techniques such as Screen-Space Ambient Occlusion (SSAO)~\cite{10.1145/2945292.2945300} and Screen-Space Directional Occlusion (SSDO)~\cite{article_SSDO} have found wide usage in video games. These effects are, however, performance-oriented approximations of the true Ambient Occlusion effect but operating on the Z-buffer rather than operating on the full geometry of the scene.
+
+The highest visual quality of Screen-Space Ambient-Occlusion is achieved using Ray-Traced Ambient Occlusion (RTAO)~\cite{laine_kerras_AO}. RTAO is a post-processing effect sometimes used in the latency insensitive world of movies and offline rendering but is generally considered too computationally expensive for real-time applications. While RTAO is still a screen space effect, it nonetheless accounts for the entire scene and makes AO a global effect computed for only the fragments visible on the screen. 
+
+\begin{figure}[htb]
+  \centering
+  \includegraphics[width=1.0\linewidth]{AO_for_dummys}
+ 
+  \caption{\label{fig:RTAO_intro}
+           A simplified example of Ray-Traced Ambient Occlusion showing three levels of occlusion of ambient lighting. \circled{1} is unoccluded, \circled{2} is partially occluded and \circled{3} is heavily occluded.
+           }
+\end{figure}
+
+Figure~\ref{fig:RTAO_intro} show a simplistic 2D example of RTAO. Ambient Occlusion is a per-surface point effect and has to be computed for each visible surface point. Figure~\ref{fig:RTAO_intro} illustrates 3 distinct examples of such surface points.
+\circled{1} is a point on a flat surface; no geometry on a flat surface occludes \circled{1} and therefore \circled{1}'s ambient color should not be attenuated during rendering. RTAO determines the absence of any AO attenuation at \circled{1} by shooting a given number k rays originating at the surface with a given ray extent (t\textsubscript{min}, t\textsubscript{max}). The rays shot originating at \circled{1} do not intersect any surrounding geometry, therefore, \circled{1} is unoccluded. 
+
+\circled{2} is partially occluded and its ambient color should be partially attenuated. RTAO determines this partial occlusion by shooting k rays with \circled{2} as their origin. As illustrated, half the rays hit surrounding geometry, e.g. the wall to the right of \circled{2}.
+
+\circled{3} is completely occluded and its color should be heavily attenuated. RTAO determines this by the large majority of the rays originating at \circled{3} intersect surrounding geometry.
+
+
+
+
+
+
+
+
+
+
+
+
+\begin{comment}
+
+\begin{epigraph}
+    \emph{If I have seen farther it is by standing on the shoulders of
+    Giants.} ---~Sir Isaac Newton (1855)
+\end{epigraph}
+
+This document provides a quick set of instructions for using the
+\class{ubcdiss} class to write a dissertation in \LaTeX. 
+Unfortunately this document cannot provide an introduction to using
+\LaTeX.  The classic reference for learning \LaTeX\ is
+\citeauthor{lamport-1994-ladps}'s
+book~\cite{lamport-1994-ladps}.  There are also many freely-available
+tutorials online;
+\webref{http://www.andy-roberts.net/misc/latex/}{Andy Roberts' online
+    \LaTeX\ tutorials}
+seems to be excellent.
+The source code for this docment, however, is intended to serve as
+an example for creating a \LaTeX\ version of your dissertation.
+
+We start by discussing organizational issues, such as splitting
+your dissertation into multiple files, in
+\autoref{sec:SuggestedThesisOrganization}.
+We then cover the ease of managing cross-references in \LaTeX\ in
+\autoref{sec:CrossReferences}.
+We cover managing and using bibliographies with \BibTeX\ in
+\autoref{sec:BibTeX}. 
+We briefly describe typesetting attractive tables in
+\autoref{sec:TypesettingTables}.
+We briefly describe including external figures in
+\autoref{sec:Graphics}, and using special characters and symbols
+in \autoref{sec:SpecialSymbols}.
+As it is often useful to track different versions of your dissertation,
+we discuss revision control further in
+\autoref{sec:DissertationRevisionControl}. 
+We conclude with pointers to additional sources of information in
+\autoref{sec:Conclusions}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Suggested Thesis Organization}
+\label{sec:SuggestedThesisOrganization}
+
+The \acs{UBC} \acf{GPS} specifies a particular arrangement of the
+components forming a thesis.\footnote{See
+    \url{http://www.grad.ubc.ca/current-students/dissertation-thesis-preparation/order-components}}
+This template reflects that arrangement.
+
+In terms of writing your thesis, the recommended best practice for
+organizing large documents in \LaTeX\ is to place each chapter in
+a separate file.  These chapters are then included from the main
+file through the use of \verb+\include{file}+.  A thesis might
+be described as six files such as \file{intro.tex},
+\file{relwork.tex}, \file{model.tex}, \file{eval.tex},
+\file{discuss.tex}, and \file{concl.tex}.
+
+We also encourage you to use macros for separating how something
+will be typeset (\eg bold, or italics) from the meaning of that
+something. 
+For example, if you look at \file{intro.tex}, you will see repeated
+uses of a macro \verb+\file{}+ to indicate file names.
+The \verb+\file{}+ macro is defined in the file \file{macros.tex}.
+The consistent use of \verb+\file{}+ throughout the text not only
+indicates that the argument to the macro represents a file (providing
+meaning or semantics), but also allows easily changing how
+file names are typeset simply by changing the definition of the
+\verb+\file{}+ macro.
+\file{macros.tex} contains other useful macros for properly typesetting
+things like the proper uses of the latinate \emph{exempli grati\={a}}
+and \emph{id est} (\ie \verb+\eg+ and \verb+\ie+), 
+web references with a footnoted \acs{URL} (\verb+\webref{url}{text}+),
+as well as definitions specific to this documentation
+(\verb+\latexpackage{}+).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Making Cross-References}
+\label{sec:CrossReferences}
+
+\LaTeX\ make managing cross-references easy, and the \latexpackage{hyperref}
+package's\ \verb+\autoref{}+ command\footnote{%
+    The \latexpackage{hyperref} package is included by default in this
+    template.}
+makes it easier still. 
+
+A thing to be cross-referenced, such as a section, figure, or equation,
+is \emph{labelled} using a unique, user-provided identifier, defined
+using the \verb+\label{}+ command.  
+The thing is referenced elsewhere using the \verb+\autoref{}+ command.
+For example, this section was defined using:
+\begin{lstlisting}
+    \section{Making Cross-References}
+    \label{sec:CrossReferences}
+\end{lstlisting}
+References to this section are made as follows:
+\begin{lstlisting}
+    We then cover the ease of managing cross-references in \LaTeX\
+    in \autoref{sec:CrossReferences}.
+\end{lstlisting}
+\verb+\autoref{}+ takes care of determining the \emph{type} of the 
+thing being referenced, so the example above is rendered as
+\begin{quote}
+    We then cover the ease of managing cross-references in \LaTeX\
+    in \autoref{sec:CrossReferences}.
+\end{quote}
+
+The label is any simple sequence of characters, numbers, digits,
+and some punctuation marks such as ``:'' and ``--''; there should
+be no spaces.  Try to use a consistent key format: this simplifies
+remembering how to make references.  This document uses a prefix
+to indicate the type of the thing being referenced, such as \texttt{sec}
+for sections, \texttt{fig} for figures, \texttt{tbl} for tables,
+and \texttt{eqn} for equations.
+
+For details on defining the text used to describe the type
+of \emph{thing}, search \file{diss.tex} and the \latexpackage{hyperref}
+documentation for \texttt{autorefname}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Managing Bibliographies with \BibTeX}
+\label{sec:BibTeX}
+
+One of the primary benefits of using \LaTeX\ is its companion program,
+\BibTeX, for managing bibliographies and citations.  Managing
+bibliographies has three parts: (i) describing references,
+(ii)~citing references, and (iii)~formatting cited references.
+
+\subsection{Describing References}
+
+\BibTeX\ defines a standard format for recording details about a
+reference.  These references are recorded in a file with a
+\file{.bib} extension.  \BibTeX\ supports a broad range of
+references, such as books, articles, items in a conference proceedings,
+chapters, technical reports, manuals, dissertations, and unpublished
+manuscripts. 
+A reference may include attributes such as the authors,
+the title, the page numbers, the \ac{DOI}, or a \ac{URL}.  A reference
+can also be augmented with personal attributes, such as a rating,
+notes, or keywords.
+
+Each reference must be described by a unique \emph{key}.\footnote{%
+    Note that the citation keys are different from the reference
+    identifiers as described in \autoref{sec:CrossReferences}.}
+A key is a simple sequence of characters, numbers, digits, and some
+punctuation marks such as ``:'' and ``--''; there should be no spaces. 
+A consistent key format simiplifies remembering how to make references. 
+For example:
+\begin{quote}
+   \fbox{\emph{last-name}}\texttt{-}\fbox{\emph{year}}\texttt{-}\fbox{\emph{contracted-title}}
+\end{quote}
+where \emph{last-name} represents the last name for the first author,
+and \emph{contracted-title} is some meaningful contraction of the
+title.  Then \citeauthor{kiczales-1997-aop}'s seminal article on
+aspect-oriented programming~\cite{kiczales-1997-aop} (published in
+\citeyear{kiczales-1997-aop}) might be given the key
+\texttt{kiczales-1997-aop}.
+
+An example of a \BibTeX\ \file{.bib} file is included as
+\file{biblio.bib}.  A description of the format a \file{.bib}
+file is beyond the scope of this document.  We instead encourage
+you to use one of the several reference managers that support the
+\BibTeX\ format such as
+\webref{http://jabref.sourceforge.net}{JabRef} (multiple platforms) or
+\webref{http://bibdesk.sourceforge.net}{BibDesk} (MacOS\,X only). 
+These front ends are similar to reference manages such as
+EndNote or RefWorks.
+
+
+\subsection{Citing References}
+
+Having described some references, we then need to cite them.  We
+do this using a form of the \verb+\cite+ command.  For example:
+\begin{lstlisting}
+    \citet{kiczales-1997-aop} present examples of crosscutting 
+    from programs written in several languages.
+\end{lstlisting}
+When processed, the \verb+\citet+ will cause the paper's authors
+and a standardized reference to the paper to be inserted in the
+document, and will also include a formatted citation for the paper
+in the bibliography.  For example:
+\begin{quote}
+    \citet{kiczales-1997-aop} present examples of crosscutting 
+    from programs written in several languages.
+\end{quote}
+There are several forms of the \verb+\cite+ command (provided
+by the \latexpackage{natbib} package), as demonstrated in
+\autoref{tbl:natbib:cite}.
+Note that the form of the citation (numeric or author-year) depends
+on the bibliography style (described in the next section).
+The \verb+\citet+ variant is used when the author names form
+an object in the sentence, whereas the \verb+\citep+ variant
+is used for parenthetic references, more like an end-note.
+Use \verb+\nocite+ to include a citation in the bibliography
+but without an actual reference.
+\nocite{rowling-1997-hpps}
+\begin{table}
+\caption{Available \texttt{cite} variants; the exact citation style
+    depends on whether the bibliography style is numeric or author-year.}
+\label{tbl:natbib:cite}
+\centering
+\begin{tabular}{lp{3.25in}}\toprule
+Variant & Result \\
+\midrule
+% We cheat here to simulate the cite/citep/citet for APA-like styles
+\verb+\cite+ & Parenthetical citation (\eg ``\cite{kiczales-1997-aop}''
+    or ``(\citeauthor{kiczales-1997-aop} \citeyear{kiczales-1997-aop})'') \\
+\verb+\citet+ & Textual citation: includes author (\eg
+    ``\citet{kiczales-1997-aop}'' or
+    or ``\citeauthor{kiczales-1997-aop} (\citeyear{kiczales-1997-aop})'') \\
+\verb+\citet*+ & Textual citation with unabbreviated author list \\
+\verb+\citealt+ & Like \verb+\citet+ but without parentheses \\
+\verb+\citep+ & Parenthetical citation (\eg ``\cite{kiczales-1997-aop}''
+    or ``(\citeauthor{kiczales-1997-aop} \citeyear{kiczales-1997-aop})'') \\
+\verb+\citep*+ & Parenthetical citation with unabbreviated author list \\
+\verb+\citealp+ & Like \verb+\citep+ but without parentheses \\
+\verb+\citeauthor+ & Author only (\eg ``\citeauthor{kiczales-1997-aop}'') \\
+\verb+\citeauthor*+ & Unabbreviated authors list 
+    (\eg ``\citeauthor*{kiczales-1997-aop}'') \\
+\verb+\citeyear+ & Year of citation (\eg ``\citeyear{kiczales-1997-aop}'') \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Formatting Cited References}
+
+\BibTeX\ separates the citing of a reference from how the cited
+reference is formatted for a bibliography, specified with the
+\verb+\bibliographystyle+ command. 
+There are many varieties, such as \texttt{plainnat}, \texttt{abbrvnat},
+\texttt{unsrtnat}, and \texttt{vancouver}.
+This document was formatted with \texttt{abbrvnat}.
+Look through your \TeX\ distribution for \file{.bst} files. 
+Note that use of some \file{.bst} files do not emit all the information
+necessary to properly use \verb+\citet{}+, \verb+\citep{}+,
+\verb+\citeyear{}+, and \verb+\citeauthor{}+.
+
+There are also packages available to place citations on a per-chapter
+basis (\latexpackage{bibunits}), as footnotes (\latexpackage{footbib}),
+and inline (\latexpackage{bibentry}).
+Those who wish to exert maximum control over their bibliography
+style should see the amazing \latexpackage{custom-bib} package.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Typesetting Tables}
+\label{sec:TypesettingTables}
+
+\citet{lamport-1994-ladps} made one grievous mistake
+in \LaTeX: his suggested manner for typesetting tables produces
+typographic abominations.  These suggestions have unfortunately
+been replicated in most \LaTeX\ tutorials.  These
+abominations are easily avoided simply by ignoring his examples
+illustrating the use of horizontal and vertical rules (specifically
+the use of \verb+\hline+ and \verb+|+) and using the
+\latexpackage{booktabs} package instead.
+
+The \latexpackage{booktabs} package helps produce tables in the form
+used by most professionally-edited journals through the use of
+three new types of dividing lines, or \emph{rules}.
+% There are times that you don't want to use \autoref{}
+Tables~\ref{tbl:natbib:cite} and~\ref{tbl:LaTeX:Symbols} are two
+examples of tables typeset with the \latexpackage{booktabs} package.
+The \latexpackage{booktabs} package provides three new commands
+for producing rules:
+\verb+\toprule+ for the rule to appear at the top of the table,
+\verb+\midrule+ for the middle rule following the table header,
+and \verb+\bottomrule+ for the bottom-most at the end of the table.
+These rules differ by their weight (thickness) and the spacing before
+and after.
+A table is typeset in the following manner:
+\begin{lstlisting}
+    \begin{table}
+    \caption{The caption for the table}
+    \label{tbl:label}
+    \centering
+    \begin{tabular}{cc}
+    \toprule
+    Header & Elements \\
+    \midrule
+    Row 1 & Row 1 \\
+    Row 2 & Row 2 \\
+    % ... and on and on ...
+    Row N & Row N \\
+    \bottomrule
+    \end{tabular}
+    \end{table}
+\end{lstlisting}
+See the \latexpackage{booktabs} documentation for advice in dealing with
+special cases, such as subheading rules, introducing extra space
+for divisions, and interior rules.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Figures, Graphics, and Special Characters}
+\label{sec:Graphics}
+
+Most \LaTeX\ beginners find figures to be one of the more challenging
+topics.  In \LaTeX, a figure is a \emph{floating element}, to be
+placed where it best fits.
+The user is not expected to concern him/herself with the placement
+of the figure.  The figure should instead be labelled, and where
+the figure is used, the text should use \verb+\autoref+ to reference
+the figure's label.
+\autoref{fig:latex-affirmation} is an example of a figure.
+\begin{figure}
+    \centering
+    % For the sake of this example, we'll just use text
+    %\includegraphics[width=3in]{file}
+    \Huge{\textsf{\LaTeX\ Rocks!}}
+    \caption{Proof of \LaTeX's amazing abilities}
+    \label{fig:latex-affirmation}   % label should change
+\end{figure}
+A figure is generally included as follows:
+\begin{lstlisting}
+    \begin{figure}
+    \centering
+    \includegraphics[width=3in]{file}
+    \caption{A useful caption}
+    \label{fig:fig-label}   % label should change
+    \end{figure}
+\end{lstlisting}
+There are three items of note:
+\begin{enumerate}
+\item External files are included using the \verb+\includegraphics+
+    command.  This command is defined by the \latexpackage{graphicx} package
+    and can often natively import graphics from a variety of formats.
+    The set of formats supported depends on your \TeX\ command processor.
+    Both \texttt{pdflatex} and \texttt{xelatex}, for example, can
+    import \textsc{gif}, \textsc{jpg}, and \textsc{pdf}.  The plain
+    version of \texttt{latex} only supports \textsc{eps} files.
+
+\item The \verb+\caption+ provides a caption to the figure. 
+    This caption is normally listed in the List of Figures; you
+    can provide an alternative caption for the LoF by providing
+    an optional argument to the \verb+\caption+ like so:
+    \begin{lstlisting}
+    \caption[nice shortened caption for LoF]{%
+	longer detailed caption used for the figure}
+    \end{lstlisting}
+    \ac{GPS} generally prefers shortened single-line captions
+    in the LoF: multiple-line captions are a bit unwieldy.
+
+\item The \verb+\label+ command provides for associating a unique, user-defined,
+    and descriptive identifier to the figure.  The figure can be
+    can be referenced elsewhere in the text with this identifier
+    as described in \autoref{sec:CrossReferences}.
+\end{enumerate}
+See Keith Reckdahl’s excellent guide for more details,
+\webref{http://www.ctan.org/tex-archive/info/epslatex.pdf}{\emph{Using
+imported graphics in LaTeX2e}}.
+
+\section{Special Characters and Symbols}
+\label{sec:SpecialSymbols}
+
+\LaTeX\ appropriates many common symbols for its own purposes,
+with some used for commands (\ie \verb+\{}&%+) and
+mathematics (\ie \verb+$^_+), and others are automagically transformed
+into typographically-preferred forms (\ie \verb+-`'+) or to
+completely different forms (\ie \verb+<>+).
+\autoref{tbl:LaTeX:Symbols} presents a list of common symbols and
+their corresponding \LaTeX\ commands.  A much more comprehensive list 
+of symbols and accented characters is available at:
+\url{http://www.ctan.org/tex-archive/info/symbols/comprehensive/}
+\begin{table}
+\caption{Useful \LaTeX\ symbols}\label{tbl:LaTeX:Symbols}
+\centering\begin{tabular}{ccp{0.5cm}cc}\toprule
+\LaTeX & Result && \LaTeX & Result \\
+\midrule
+    \verb+\texttrademark+ & \texttrademark && \verb+\&+ & \& \\
+    \verb+\textcopyright+ & \textcopyright && \verb+\{ \}+ & \{ \} \\
+    \verb+\textregistered+ & \textregistered && \verb+\%+ & \% \\
+    \verb+\textsection+ & \textsection && \verb+\verb!~!+ & \verb!~! \\
+    \verb+\textdagger+ & \textdagger && \verb+\$+ & \$ \\
+    \verb+\textdaggerdbl+ & \textdaggerdbl && \verb+\^{}+ & \^{} \\
+    \verb+\textless+ & \textless && \verb+\_+ & \_ \\
+    \verb+\textgreater+ & \textgreater && \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Changing Page Widths and Heights}
+
+The \class{ubcdiss} class is based on the standard \LaTeX\ \class{book}
+class~\cite{lamport-1994-ladps} that selects a line-width to carry
+approximately 66~characters per line.  This character density is
+claimed to have a pleasing appearance and also supports more rapid
+reading~\cite{bringhurst-2002-teots}.  I would recommend that you
+not change the line-widths!
+
+\subsection{The \texttt{geometry} Package}
+
+Some students are unfortunately saddled with misguided supervisors
+or committee members whom believe that documents should have the
+narrowest margins possible.  The \latexpackage{geometry} package is
+helpful in such cases.  Using this package is as simple as:
+\begin{lstlisting}
+    \usepackage[margin=1.25in,top=1.25in,bottom=1.25in]{geometry}
+\end{lstlisting}
+You should check the package's documentation for more complex uses.
+
+\subsection{Changing Page Layout Values By Hand}
+
+There are some miserable students with requirements for page layouts
+that vary throughout the document.  Unfortunately the
+\latexpackage{geometry} can only be specified once, in the document's
+preamble.  Such miserable students must set \LaTeX's layout parameters
+by hand:
+\begin{lstlisting}
+    \setlength{\topmargin}{-.75in}
+    \setlength{\headsep}{0.25in}
+    \setlength{\headheight}{15pt}
+    \setlength{\textheight}{9in}
+    \setlength{\footskip}{0.25in}
+    \setlength{\footheight}{15pt}
+
+    % The *sidemargin values are relative to 1in; so the following
+    % results in a 0.75 inch margin
+    \setlength{\oddsidemargin}{-0.25in}
+    \setlength{\evensidemargin}{-0.25in}
+    \setlength{\textwidth}{7in}       % 1.1in margins (8.5-2*0.75)
+\end{lstlisting}
+These settings necessarily require assuming a particular page height
+and width; in the above, the setting for \verb+\textwidth+ assumes
+a \textsc{US} Letter with an 8.5'' width.
+The \latexpackage{geometry} package simply uses the page height and
+other specified values to derive the other layout values.
+The
+\href{http://tug.ctan.org/tex-archive/macros/latex/required/tools/layout.pdf}{\texttt{layout}}
+package provides a
+handy \verb+\layout+ command to show the current page layout
+parameters. 
+
+
+\subsection{Making Temporary Changes to Page Layout}
+
+There are occasions where it becomes necessary to make temporary
+changes to the page width, such as to accomodate a larger formula. 
+The \latexmiscpackage{chngpage} package provides an \env{adjustwidth}
+environment that does just this.  For example:
+\begin{lstlisting}
+    % Expand left and right margins by 0.75in
+    \begin{adjustwidth}{-0.75in}{-0.75in}
+    % Must adjust the perceived column width for LaTeX to get with it.
+    \addtolength{\columnwidth}{1.5in}
+    \[ an extra long math formula \]
+    \end{adjustwidth}
+\end{lstlisting}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Keeping Track of Versions with Revision Control}
+\label{sec:DissertationRevisionControl}
+
+Software engineers have used \acf{RCS} to track changes to their
+software systems for decades.  These systems record the changes to
+the source code along with context as to why the change was required.
+These systems also support examining and reverting to particular
+revisions from their system's past.
+
+An \ac{RCS} can be used to keep track of changes to things other
+than source code, such as your dissertation.  For example, it can
+be useful to know exactly which revision of your dissertation was
+sent to a particular committee member.  Or to recover an accidentally
+deleted file, or a badly modified image.  With a revision control
+system, you can tag or annotate the revision of your dissertation
+that was sent to your committee, or when you incorporated changes
+from your supervisor.
+
+Unfortunately current revision control packages are not yet targetted
+to non-developers.  But the Subversion project's
+\webref{http://tortoisesvn.net/docs/release/TortoiseSVN_en/}{TortoiseSVN}
+has greatly simplified using the Subversion revision control system
+for Windows users.  You should consult your local geek.
+
+A simpler alternative strategy is to create a GoogleMail account
+and periodically mail yourself zipped copies of your dissertation.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Recommended Packages}
+
+The real strength to \LaTeX\ is found in the myriad of free add-on
+packages available for handling special formatting requirements.
+In this section we list some helpful packages.
+
+\subsection{Typesetting}
+
+\begin{description}
+\item[\latexpackage{enumitem}:]
+    Supports pausing and resuming enumerate environments.
+
+\item[\latexpackage{ulem}:]
+    Provides two new commands for striking out and crossing out text
+    (\verb+\sout{text}+ and \verb+\xout{text}+ respectively)
+    The package should likely
+    be used as follows:
+    \begin{verbatim}
+    \usepackage[normalem,normalbf]{ulem}
+    \end{verbatim}
+    to prevent the package from redefining the emphasis and bold fonts.
+
+\item[\latexpackage{chngpage}:]
+    Support changing the page widths on demand.
+
+\item[\latexpackage{mhchem}:] 
+    Support for typesetting chemical formulae and reaction equations.
+
+\end{description}
+
+Although not a package, the
+\webref{http://www.ctan.org/tex-archive/support/latexdiff/}{\texttt{latexdiff}}
+command is very useful for creating changebar'd versions of your
+dissertation.
+
+
+\subsection{Figures, Tables, and Document Extracts}
+
+\begin{description}
+\item[\latexpackage{pdfpages}:]
+    Insert pages from other PDF files.  Allows referencing the extracted
+    pages in the list of figures, adding labels to reference the page
+    from elsewhere, and add borders to the pages.
+
+\item[\latexpackage{subfig}:]
+    Provides for including subfigures within a figure, and includes
+    being able to separately reference the subfigures.  This is a
+    replacement for the older \texttt{subfigure} environment.
+
+\item[\latexpackage{rotating}:]
+    Provides two environments, sidewaystable and sidewaysfigure,
+    for typesetting tables and figures in landscape mode.  
+
+\item[\latexpackage{longtable}:]
+    Support for long tables that span multiple pages.
+
+\item[\latexpackage{tabularx}:]
+    Provides an enhanced tabular environment with auto-sizing columns.
+
+\item[\latexpackage{ragged2e}:]
+    Provides several new commands for setting ragged text (\eg forms
+    of centered or flushed text) that can be used in tabular
+    environments and that support hyphenation.
+
+\end{description}
+
+
+\subsection{Bibliography Related Packages}
+
+\begin{description}
+\item[\latexpackage{bibunits}:]
+    Support having per-chapter bibliographies.
+
+\item[\latexpackage{footbib}:]
+    Cause cited works to be rendered using footnotes.
+
+\item[\latexpackage{bibentry}:] 
+    Support placing the details of a cited work in-line.
+
+\item[\latexpackage{custom-bib}:]
+    Generate a custom style for your bibliography.
+
+\end{description}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Moving On}
+\label{sec:Conclusions}
+
+At this point, you should be ready to go.  Other handy web resources:
+\begin{itemize}
+\item \webref{http://www.ctan.org}{\ac{CTAN}} is \emph{the} comprehensive
+    archive site for all things related to \TeX\ and \LaTeX. 
+    Should you have some particular requirement, somebody else is
+    almost certainly to have had the same requirement before you,
+    and the solution will be found on \ac{CTAN}.  The links to
+    various packages in this document are all to \ac{CTAN}.
+
+\item An online
+    \webref{http://www.ctan.org/get/info/latex2e-help-texinfo/latex2e.html}{%
+	reference to \LaTeX\ commands} provides a handy quick-reference
+    to the standard \LaTeX\ commands.
+
+\item The list of 
+    \webref{http://www.tex.ac.uk/cgi-bin/texfaq2html?label=interruptlist}{%
+	Frequently Asked Questions about \TeX\ and \LaTeX}
+    can save you a huge amount of time in finding solutions to
+    common problems.
+
+\item The \webref{http://www.tug.org/tetex/tetex-texmfdist/doc/}{te\TeX\
+    documentation guide} features a very handy list of the most useful
+    packages for \LaTeX\ as found in \ac{CTAN}.
+
+\item The
+\webref{http://www.ctan.org/tex-archive/macros/latex/required/graphics/grfguide.pdf}{\texttt{color}}
+    package, part of the graphics bundle, provides handy commands
+    for changing text and background colours.  Simply changing
+    text to various levels of grey can have a very 
+    \textcolor{greytext}{dramatic effect}.
+
+
+\item If you're really keen, you might want to join the
+    \webref{http://www.tug.org}{\TeX\ Users Group}.
+
+\end{itemize}
+
+\endinput
+
+Any text after an \endinput is ignored.
+You could put scraps here or things in progress.
+
+
+\end{comment}

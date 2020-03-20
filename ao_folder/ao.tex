@@ -1,0 +1,15 @@
+%% The following is a directive for TeXShop to indicate the main file
+%%!TEX root = diss.tex
+
+\chapter{Ray-Traced Ambient Occlusion GPU Memory Study}
+\label{ch:ao}
+
+The Ambient Occlusion (AO, ~\autoref{sec:ao_intro}) effect is crucial to visual quality in rasterization graphics and is implemented as a post-processing in rasterization graphics. We study one such implementation, Ray-Traced Ambient Occlusion (RTAO), for the following reasons:
+\begin{itemize}
+\item RTAO yields the highest visual quality by imitating the true physics of light particles, RTAO is a global effect and does not suffer from the limitations of screen-space effects
+\item AO is a post-processing effect, therefore, it is trivial to replace existing effects such as SSAO in rasterization based game engines by RTAO. RTAO is an active area of research for hybrid rendering (~\cite{Barre_Brisebois2019}, ~\autoref{sec:hybrid_intro})
+\item RTAO is a relevant benchmark when studying divergent rays on a GPU simulator such as GPGPU-Sim~\cite{4919648} because AO generates viewpoint independent, highly divergent rays which do not need to bounce.
+\end{itemize}
+
+In this chapter, we first introduce our open-source implementation of a viewpoint independent RTAO GPU compute benchmark (~\autoref{sec:ao_benchmark_intro_inline}). We show the visual output in~\autoref{sec:visual_ao}. We then analyse the GPU compute runtime, drawing conclusions on feasibility for real-time hybrid RTAO effects and study the benchmark's memory behavior using GPGPU-Sim (~\autoref{sec:mem_behavior_performance}). 
+

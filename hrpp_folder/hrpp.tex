@@ -1,0 +1,26 @@
+%% The following is a directive for TeXShop to indicate the main file
+%%!TEX root = diss.tex
+
+\chapter{Hash-Based Ray Path Prediction}
+\label{ch:hrpp}
+
+State-of-the-art ray tracing techniques operate on hierarchical acceleration structures such as BVH trees which wrap objects in a scene into bounding volumes of decreasing sizes. Acceleration structures reduce the amount of ray-scene intersections that a ray has to perform to find the intersecting object. However, we observe a large amount of redundancy when rays are traversing these acceleration structures. While modern acceleration structures explore the spatial organization of the scene, they neglect similarities between rays that traverse the structures and thereby cause redundant traversals.
+
+This paper provides a limit study of a new promising technique, Hash-Based Ray Path Prediction (HRPP), which exploits the similarity between rays to predict leaf nodes to avoid redundant acceleration structure traversals. Our data shows that acceleration structure traversal consumes a significant proportion of the ray tracing rendering time regardless of the platform or the target image quality. Our study quantifies unused ray locality and evaluates the theoretical potential for improved ray traversal performance for both coherent and seemingly incoherent rays. We show that HRPP is able to skip, on average, 40\% of all hit-all traversal computations.
+
+Ray tracing techniques~\cite{Whitted:1980:IIM:358876.358882} employ hierarchical acceleration structures, such as Bounding Volume Hierarchies (BVH), that capture spatial locality through subdividing scenes into a hierarchy of ever tighter bounding boxes. These acceleration structures, i.e., traversal trees, reduce the subset of a scene that a ray has to intersect. However, reducing ray-scene calculations comes at the cost of additional ray-box intersections that have to precede ray-scene intersection computations. 
+
+Consequently, a trade-off has to be made between the depth and the width of a traversal tree, where the branching factor determines the depth and width of a tree. Wide trees are shallow and able to quickly traverse a ray to a leaf node for ray-scene intersection computations. On the other hand, deep trees need to traverse many interior levels to reach a leaf node but it entails less ray-scene calculations.
+
+This paper proposes and studies the potential of a new technique, hash-based ray path prediction (HRPP), which reduces the cost of traversing deep trees by exploiting ray locality, where rays from close-by origins and similar directions follow a similar path through the tree. HRPP exploits ray locality present throughout a scene traversal to skip redundant ray-box intersections. 
+
+Extensive work has been done in recent years exploiting ray coherence for efficient traversal by mapping coherent rays to parallel hardware such as SIMD units and GPU Warps \cite{doi:10.1111/1467-8659.00508, Wald07simdray, Pharr:1997:RCS:258734.258791}. HRPP is different in that it proposes to skip redundant ray traversal computations and prevent rays with high locality to previous rays from even entering the acceleration structure. Skipping interior node traversal avoids all DRAM traffic associated with interior nodes and reduces to overall computations needed to ray trace a frame.
+
+Similar to the limit study by Lam and Wilson \cite{Lam:1992:LCF:139669.139702} which presents an upper bound on control flow parallelism, we present a limit study on how many interior nodes can be skipped by exploiting ray locality using HRPP.
+
+This paper makes the following contributions:
+\begin{itemize}
+\item It highlights the potential of ray path prediction for accelerating hierarchical tree traversal;
+\item It proposes a hash function that takes into account ray properties so it can be used for predicting the path of similar rays;
+\item It shows a theoretical limit study that quantifies ray locality and evaluates its potential for performance improvements using HRPP, which was able to avoid 30\% of ray-box intersections. This limit study serves as a basis of a future hardware-based implementation that can harness HRPP to improve ray tracing performance.
+\end{itemize}

@@ -1,0 +1,26 @@
+%% The following is a directive for TeXShop to indicate the main file
+%%!TEX root = diss.tex
+\chapter{Conclusion and Future Work}
+\label{ch:Conclusion}
+
+\section{Future Work}
+
+While the scope of this thesis is limited to current GPU architectures and current efforts to advance hybrid rendering, we have identified avenues for future work.
+
+\begin{itemize}
+  \item Evaluate other raytracing effects for hybrid rendering. We should evaluate ray-traced shadows, ray-traced reflection and refraction, raytraced volume rendering and ray traced global illumination. 
+  \item Evaluate which areas or effects benefit the most from raytracing effects.
+  \item Study future hardware architectures that follow the MIMD paradigm or custom FPGA and ASIC hardware architectures for raytracing.
+\end{itemize}
+
+\section{Conclusion}
+
+In this thesis, we have explored the bottleneck of real-time raytracing by focusing on current GPU architectures.
+
+In this thesis we have present:
+\begin{itemize}
+  \item An open-source implementation of a Ray-Traced Ambient-Occlusion benchmark for use as a hybrid rendering workload. We have shown that our benchmark can accurately produce high quality ambinet occlusion for scenes that are too complex for real-time rendering as of yet. We provide 3 state of the are GPU compute raytracing kernels, 2 academic kernels and one kernel that relies on the state-of-the-art commercially available API. 
+  \item The first evaluation of the memory behavior of current SIMT Compute raytracing of the highly divergent RTAO benchmark on current GPU architectures. We have qualtified the effect on scene size, samples per pixel and samples per triangles. We have quantified the detailed memory reuse patterns using a detailed GPU simulator.
+  \item We have proposed a novel approach to accelerate BVH traversal by predicting; we show a possible reduction of 40\% in interior node computations in theory, but we conclude that the feasibility our approach is low due to significant memory overhead.
+\end{itemize}
+

@@ -1,0 +1,25 @@
+\section{Ray Tracing Performance Evaluation}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=.8\linewidth]{fig_1}
+ 
+  \caption{\label{fig:figure1}
+           Runtime proportions of increasingly complex scenes on CPU and GPU - 1024$\times$1024 - 8 spp}
+\end{figure}
+
+
+
+We studied the performance characteristics of hierarchical acceleration structures using two BVH-based ray tracing implementations: the CPU-based PBRT~\cite{Pharr:2010:PBR:1854996} renderer and Aila's~\cite{Aila:2009:UER:1572769.1572792} GPU-based renderer. 
+
+PBRT differs from Aila's in that it renders scenes at a higher visual quality. Aila's GPU implementation is optimized for speed and real-time image generation; hence, less effort is put into sophisticated sampling and lighting computations while texture lookups are omitted.
+
+Figure~\ref{fig:figure1} shows the proportion of the total run-time consumed on rendering ray-box intersections (interior nodes) and ray-scene intersections (leaf nodes) in both implementations on increasingly complex scenes. The proportion labeled `Other' in Figure~\ref{fig:figure1} is spent on path tracing tasks such as sampling, texture lookups or lighting computations. The proportion of time spent computing ray-box and ray-triangle intersections is correlated with the geometrical complexity of the scene.
+
+For the CPU-based PBRT, the time spent in traversing the BVH tree is, on average, 40\% of the total execution time, where around 80\% of the traversal time is spent on ray-box intersections.
+
+For Aila's GPU-based ray tracer, the proportion of time spent on BVH traversal is, as expected, higher compared to PBRT. Figure~\ref{fig:figure1} shows that the GPU path tracer is spending upwards of 95\% of the execution time performing tree traversal. Similar to PBRT, the most time-consuming step is ray-box intersections.
+
+The results above show that tree traversal remains the most time-consuming step in ray tracing, even when using benchmarks that use very different rendering implementations and target different levels of image quality. Thus, accelerating the traversal process would benefit both real-time ray tracing (e.g., Aila's GPU implementation) and offline ray tracing (e.g., PBRT), as in both cases calculating ray-box intersections remains the most costly part of the process.
+
+In this paper, we provide a study showing the potential of using Hash-Based Ray Path Prediction to reduce the amount of ray-box intersections calculations (i.e., interior node traversal). Whereby, taking into account the properties of rays and their path through a scene, we can predict which part of a scene a ray intersects; thus, avoiding traversing internal tree levels to reach target leaf nodes.

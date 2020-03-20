@@ -1,0 +1,44 @@
+\section{Limit Study} \label{sec:hrpp_res}
+
+We implement a software version of HRPP as an extension of the PBRT renderer to quantify the ray locality present in various example scenes. We present an extensive discussion of which parameters are relevant to HRPP and quantify their effect on prediction accuracy. 
+ 
+While previous limit studies, such as the one by Lam and Wilson \cite{Lam:1992:LCF:139669.139702}, show the potential for improvement over the state of the art by quantifying the presence of a new type of locality, they do not provide a practical implementation. This paper, however, presents both a limit study similar to \cite{Lam:1992:LCF:139669.139702} and HRPP as a technique that can be adopted in hardware to produce speedup over the current state of the art raytracers.
+
+For this limit study, our software implementation has the drawback of using a large amount of additional memory, often exceeding over 100MB. A future hardware implementation of HRPP can address the memory problem by implementing a replacement policy for the HRPP predictor table. Future work will study the impact of a replacement policy on the accuracy and the memory consumption of HRPP.
+
+ 
+\subsection{Overview Table}
+Results are summarized in Table~\ref{tab:table_label}. We evaluate HRPP on five scenes with unified binary BVH trees of increasing geometrical and illumination complexities. We evaluate two distinct HRPP predictors for hit-any and the hit-all rays to avoid hash conflicts between hit-all and hit-any rays. 
+
+We find that the average number of interior nodes skipped by HRPP for hit-all rays is above 30\% across all test scenes. This shows that we could skip up to 30\% of all interior node computations and the associated memory traffic by using HRPP for all hit-all rays. We conclude that hit-all rays are highly suitable for HRPP prediction. 
+
+We find that for scenes with complex lighting models such as the metal killaroo scene and the sports car scene, hit-any HRPP achieves a less than 1\% skipped interior nodes due to the low locality of global illumination rays. However, on the geometrically complex buddha scene, we skip 30\% of all hit-any interior node computations. We conclude that hit-any rays exhibit little ray locality in scenes with complex lighting models while exhibiting significant ray locality if the lighting model is simple.
+
+\subsection{Go Up Level}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=.8\linewidth]{buddha_go_up_level}
+ 
+  \caption{\label{fig:buddha_up} Impact of Go Up Level on number of predictor entries. Buddha - 1024$\times$1024 - hash precision 6 }
+\end{figure}
+
+
+We define HRPP's \textit{go up level} as the level in the acceleration structure tree the predictor table predicts. 
+A \textit{Go Up Level} of 0 predicts the acceleration structure's leaf nodes. A \textit{Go Up Level} of 1 predicts the parent node of the leaf nodes. A \textit{Go Up Level} of 2 predicts the grand-parent node of the leaf nodes, etc.
+
+As shown in Figure~\ref{fig:buddha_up}, the most significant impact of the predictor's \textit{Go Up Level} is the amount of memory used for the predictor table. A \textit{Go Up Level} of 1 results in fewer entries and therefore less memory used at the cost of a small reduction in skipped computations as compared to a \textit{Go Up Level} of 0.
+
+
+\subsection{Samples Per Pixel}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=.8\linewidth]{SPP_result}
+ 
+  \caption{\label{fig:spp_result} Impact of SPP on interor node computation skipped and the number of predictor entries. Buddha - 1024$\times$1024 - hash precision 6}
+\end{figure}
+
+We study the impact of the number of Samples Per Pixel (SPP) on the efficiency of HRPP in Figure~\ref{fig:spp_result}. 
+
+Counterintuitively, the number of SPPs is inversely correlated with the efficiency of HRPP because of hash conflicts. As the number of hash conflicts increases, the number of memory used for HRPP increases as shown in Figure~\ref{fig:spp_result}. We expect a replacement policy for HRPP to counter this trend but leave the evaluation of replacement policies as future work.

@@ -1,0 +1,7 @@
+\section{Conclusion}
+This paper explores the benefits of exploiting ray locality to accelerate BVH traversal by skipping interior nodes. In current acceleration structures ray locality goes unutilized, we show that there is speed up to be gained from exploiting this locality. 
+
+Our limit study uncovers significant potential for speed up by skipping on average 30\% of all hit-all rays during the rendering of one frame. 
+We explore the design space of ray prediction by quantifying the impact of hash precision, scene complexity, illumination complexity, samples per pixels as well as HRPP's \textit{Go Up Level}. We propose a hash mapping from IEEE 754 floating point and explore the tradeoffs for efficient hashing. 
+
+Finally, this paper provides directions for future work that addresses the current shortcomings of HRPP such as memory consumption and hash conflicts.
